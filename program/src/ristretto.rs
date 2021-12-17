@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use core::borrow::Borrow;
+
 use subtle::Choice;
 use subtle::ConditionallyNegatable;
 use subtle::ConstantTimeEq;
@@ -7,7 +9,9 @@ use subtle::ConstantTimeEq;
 use crate::backend::serial::u64::constants;
 use crate::edwards::EdwardsPoint;
 use crate::field::FieldElement;
+use crate::scalar::Scalar;
 use crate::traits::Identity;
+use crate::traits::MultiscalarMul;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct CompressedRistretto(pub [u8; 32]);
@@ -160,3 +164,27 @@ impl Default for CompressedRistretto {
 ///
 #[derive(Copy, Clone)]
 pub struct RistrettoPoint(pub(crate) EdwardsPoint);
+
+// ------------------------------------------------------------------------
+// Multiscalar Multiplication impls
+// ------------------------------------------------------------------------
+
+// These use iterator combinators to unwrap the underlying points and
+// forward to the EdwardsPoint implementations.
+
+impl MultiscalarMul for RistrettoPoint {
+    type Point = RistrettoPoint;
+
+    fn multiscalar_mul<I, J>(scalars: I, points: J) -> RistrettoPoint
+    where
+        I: IntoIterator,
+        I::Item: Borrow<Scalar>,
+        J: IntoIterator,
+        J::Item: Borrow<RistrettoPoint>,
+    {
+        let extended_points = points.into_iter().map(|P| P.borrow().0);
+        RistrettoPoint(
+            EdwardsPoint::multiscalar_mul(scalars, extended_points)
+        )
+    }
+}

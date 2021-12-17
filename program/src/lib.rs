@@ -13,5 +13,6 @@ pub mod field;
 pub mod ristretto;
 pub mod scalar;
 pub mod traits;
+pub mod window;
 
 solana_program::declare_id!("8cJuuSckrSGNEXkPeDVNqmvKY3ZMWReSCnu8W4QGetzB");
