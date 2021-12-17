@@ -1,0 +1,25 @@
+[package]
+name = "curve25519-dalek-onchain-metadata-demo-cli"
+version = "0.0.1"
+description = "Curve25519 Dalek demo"
+authors = [
+    "Lawrence Wu <larry.wu@solana.com>",
+]
+keywords = ["solana"]
+edition = "2018"
+publish = false
+
+[dependencies]
+clap = "2.33.3"
+solana-clap-utils = "1.7.15"
+solana-cli-config = "1.7.15"
+solana-client = "1.7.15"
+solana-logger = "1.7.15"
+solana-remote-wallet = "1.7.15"
+solana-sdk = "1.7.15"
+spl-token-metadata = { version = "0.0.1", features = [
+    "no-entrypoint"
+] }
+tokio = { version = "1", features = ["full"] }
+curve25519-dalek-onchain = { path = "../program", features = ["no-entrypoint"] }
+
