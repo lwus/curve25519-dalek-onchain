@@ -22,8 +22,11 @@ use {
 #[repr(u8)]
 pub enum Curve25519Instruction {
     WriteBytes,
+
+    InvSqrtInit,
     Pow22501P1,
     Pow22501P2,
+    InvSqrtFini,
 }
 
 pub fn decode_instruction_type(
@@ -89,7 +92,8 @@ pub fn write_bytes(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn pow22501_p1(
+pub fn inv_sqrt(
+    instruction_type: Curve25519Instruction,
     compute_buffer: Pubkey,
     offset: u32,
 ) -> Instruction {
@@ -100,24 +104,7 @@ pub fn pow22501_p1(
 
     encode_instruction(
         accounts,
-        Curve25519Instruction::Pow22501P1,
-        &offset,
-    )
-}
-
-#[cfg(not(target_arch = "bpf"))]
-pub fn pow22501_p2(
-    compute_buffer: Pubkey,
-    offset: u32,
-) -> Instruction {
-    let mut accounts = vec![
-        AccountMeta::new(compute_buffer, false),
-        AccountMeta::new_readonly(solana_program::system_program::id(), false),
-    ];
-
-    encode_instruction(
-        accounts,
-        Curve25519Instruction::Pow22501P2,
+        instruction_type,
         &offset,
     )
 }

@@ -46,15 +46,27 @@ async fn test_pow22501_p1() {
             instruction::write_bytes(
                 compute_buffer.pubkey(),
                 0,
-                &FieldElement::minus_one().to_bytes()
+                &FieldElement::one().to_bytes()
             ),
-            instruction::pow22501_p1(
+            instruction::inv_sqrt(
+                instruction::Curve25519Instruction::InvSqrtInit,
                 compute_buffer.pubkey(),
                 0,
             ),
-            instruction::pow22501_p2(
+            instruction::inv_sqrt(
+                instruction::Curve25519Instruction::Pow22501P1,
                 compute_buffer.pubkey(),
                 32,
+            ),
+            instruction::inv_sqrt(
+                instruction::Curve25519Instruction::Pow22501P2,
+                compute_buffer.pubkey(),
+                64,
+            ),
+            instruction::inv_sqrt(
+                instruction::Curve25519Instruction::InvSqrtFini,
+                compute_buffer.pubkey(),
+                0,
             ),
         ],
         Some(&payer.pubkey()),
