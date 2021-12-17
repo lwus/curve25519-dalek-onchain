@@ -18,6 +18,12 @@ use {
         transaction::Transaction,
     },
     std::{convert::TryInto, process::exit, sync::Arc},
+    curve25519_dalek_onchain::{
+        id,
+        instruction,
+        processor::process_instruction,
+        field::FieldElement,
+    },
 };
 
 struct Config {
@@ -25,6 +31,7 @@ struct Config {
     default_signer: Box<dyn Signer>,
     json_rpc_url: String,
     verbose: bool,
+    compute_buffer: Option<String>,
 }
 
 fn send(
@@ -55,23 +62,56 @@ fn send(
 fn process_demo(
     rpc_client: &RpcClient,
     payer: &dyn Signer,
+    compute_buffer: &Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
 
-    let test_ix = curve25519_dalek_onchain::instruction::pow25501_p1(
-        payer.pubkey(),
-        [
-           94, 126,  13, 209, 184, 218, 233,  14,
-           52, 162,  23,  15, 236, 168, 144, 134,
-          125, 127,  10,  85, 102,  76, 157,  51,
-           54, 190, 208,  98,  39,  30, 196,  87
-        ],
-    );
+    let compute_buffer = if let Some(kp) = compute_buffer {
+        Keypair::from_base58_string(kp)
+    } else {
+        Keypair::new()
+    };
+
+    println!("Compute buffer keypair: {}", compute_buffer.to_base58_string());
+
+    let buffer_len = 960; // Arbitrary
+    let buffer_minimum_balance_for_rent_exemption = rpc_client
+        .get_minimum_balance_for_rent_exemption(buffer_len)?;
+
+    let mut compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey());
+    if compute_buffer_data.is_err() {
+        send(
+            rpc_client,
+            &format!("Creating compute buffer"),
+            &[
+                system_instruction::create_account(
+                    &payer.pubkey(),
+                    &compute_buffer.pubkey(),
+                    buffer_minimum_balance_for_rent_exemption,
+                    buffer_len as u64,
+                    &id(),
+                ),
+            ],
+            &[payer, &compute_buffer],
+        )?;
+    }
 
     send(
         rpc_client,
-        &format!("Text ix"),
+        &format!("Computing x^(2^250-1)"),
         &[
-            test_ix,
+            instruction::write_bytes(
+                compute_buffer.pubkey(),
+                0,
+                &FieldElement::minus_one().to_bytes()
+            ),
+            instruction::pow22501_p1(
+                compute_buffer.pubkey(),
+                0,
+            ),
+            instruction::pow22501_p2(
+                compute_buffer.pubkey(),
+                32,
+            ),
         ],
         &[payer],
     )?;
@@ -125,6 +165,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .validator(is_url_or_moniker)
                 .help("JSON RPC URL for the cluster [default: value from configuration file]"),
         )
+        .arg(
+            Arg::with_name("compute_buffer")
+                .long("compute_buffer")
+                .value_name("COMPUTE_BUFFER")
+                .takes_value(true)
+                .global(true)
+                .help("Compute buffer keypair to use (or create)"),
+        )
         .get_matches();
 
     let mut wallet_manager: Option<Arc<RemoteWalletManager>> = None;
@@ -159,6 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }),
             verbose: matches.is_present("verbose"),
             commitment_config: CommitmentConfig::confirmed(),
+            compute_buffer: matches.value_of("compute_buffer").map(|s| s.into()),
         }
     };
     solana_logger::setup_with_default("solana=info");
@@ -172,6 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     process_demo(
         &rpc_client,
         config.default_signer.as_ref(),
+        &config.compute_buffer,
     ).unwrap_or_else(|err| {
         eprintln!("error: {}", err);
         exit(1);

@@ -21,7 +21,9 @@ use {
 #[derive(Clone, Copy, Debug, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
 pub enum Curve25519Instruction {
+    WriteBytes,
     Pow22501P1,
+    Pow22501P2,
 }
 
 pub fn decode_instruction_type(
@@ -66,18 +68,56 @@ pub fn encode_instruction<T: Pod>(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn pow25501_p1(
-    payer: Pubkey,
-    data: [u8; 32],
+pub fn write_bytes(
+    compute_buffer: Pubkey,
+    offset: u32,
+    bytes: &[u8],
 ) -> Instruction {
     let mut accounts = vec![
-        AccountMeta::new(payer, true),
+        AccountMeta::new(compute_buffer, false),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    let mut data = vec![ToPrimitive::to_u8(&Curve25519Instruction::WriteBytes).unwrap()];
+    data.extend_from_slice(bytemuck::bytes_of(&offset));
+    data.extend_from_slice(bytes);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data,
+    }
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn pow22501_p1(
+    compute_buffer: Pubkey,
+    offset: u32,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new(compute_buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
     encode_instruction(
         accounts,
         Curve25519Instruction::Pow22501P1,
-        &data,
+        &offset,
+    )
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn pow22501_p2(
+    compute_buffer: Pubkey,
+    offset: u32,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new(compute_buffer, false),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    encode_instruction(
+        accounts,
+        Curve25519Instruction::Pow22501P2,
+        &offset,
     )
 }

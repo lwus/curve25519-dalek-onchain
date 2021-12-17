@@ -16,6 +16,7 @@ no-entrypoint = []
 no-idl = []
 cpi = ["no-entrypoint"]
 default = []
+test-bpf = []
 
 [dependencies]
 bytemuck = { version = "1.7.2", features = ["derive"] }
@@ -25,3 +26,7 @@ solana-program = "=1.7.15"
 subtle = { version = "^2.2.1", default-features = false }
 zeroize = { version = "1", default-features = false }
 
+[dev-dependencies]
+solana-program-test = "1.6.7"
+solana-sdk = "1.6.7"
+proptest = "0.10"
