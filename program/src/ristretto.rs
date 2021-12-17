@@ -1,5 +1,7 @@
+#![allow(non_snake_case)]
 
 use subtle::Choice;
+use subtle::ConditionallyNegatable;
 use subtle::ConstantTimeEq;
 
 use crate::backend::serial::u64::constants;
@@ -40,67 +42,93 @@ impl CompressedRistretto {
         CompressedRistretto(tmp)
     }
 
-    ///// Attempt to decompress to an `RistrettoPoint`.
-    /////
-    ///// # Return
-    /////
-    ///// - `Some(RistrettoPoint)` if `self` was the canonical encoding of a point;
-    /////
-    ///// - `None` if `self` was not the canonical encoding of a point.
-    //pub fn decompress(&self) -> Option<RistrettoPoint> {
-    //    // Step 1. Check s for validity:
-    //    // 1.a) s must be 32 bytes (we get this from the type system)
-    //    // 1.b) s < p
-    //    // 1.c) s is nonnegative
-    //    //
-    //    // Our decoding routine ignores the high bit, so the only
-    //    // possible failure for 1.b) is if someone encodes s in 0..18
-    //    // as s+p in 2^255-19..2^255-1.  We can check this by
-    //    // converting back to bytes, and checking that we get the
-    //    // original input, since our encoding routine is canonical.
+    /// Attempt to decompress to an `RistrettoPoint`.
+    ///
+    /// # Return
+    ///
+    /// - `Some(RistrettoPoint)` if `self` was the canonical encoding of a point;
+    ///
+    /// - `None` if `self` was not the canonical encoding of a point.
+    pub fn decompress_init(&self) -> Option<FieldElement> {
+        // Step 1. Check s for validity:
+        // 1.a) s must be 32 bytes (we get this from the type system)
+        // 1.b) s < p
+        // 1.c) s is nonnegative
+        //
+        // Our decoding routine ignores the high bit, so the only
+        // possible failure for 1.b) is if someone encodes s in 0..18
+        // as s+p in 2^255-19..2^255-1.  We can check this by
+        // converting back to bytes, and checking that we get the
+        // original input, since our encoding routine is canonical.
 
-    //    let s = FieldElement::from_bytes(self.as_bytes());
-    //    let s_bytes_check = s.to_bytes();
-    //    let s_encoding_is_canonical =
-    //        &s_bytes_check[..].ct_eq(self.as_bytes());
-    //    let s_is_negative = s.is_negative();
+        let s = FieldElement::from_bytes(self.as_bytes());
+        let s_bytes_check = s.to_bytes();
+        let s_encoding_is_canonical =
+            &s_bytes_check[..].ct_eq(self.as_bytes());
+        let s_is_negative = s.is_negative();
 
-    //    if s_encoding_is_canonical.unwrap_u8() == 0u8 || s_is_negative.unwrap_u8() == 1u8 {
-    //        return None;
-    //    }
+        if s_encoding_is_canonical.unwrap_u8() == 0u8 || s_is_negative.unwrap_u8() == 1u8 {
+            return None;
+        }
 
-    //    // Step 2.  Compute (X:Y:Z:T).
-    //    let one = FieldElement::one();
-    //    let ss = s.square();
-    //    let u1 = &one - &ss;      //  1 + as²
-    //    let u2 = &one + &ss;      //  1 - as²    where a=-1
-    //    let u2_sqr = u2.square(); // (1 - as²)²
+        // Step 2.  Compute (X:Y:Z:T).
+        let one = FieldElement::one();
+        let ss = s.square();
+        let u1 = &one - &ss;      //  1 + as²
+        let u2 = &one + &ss;      //  1 - as²    where a=-1
+        let u2_sqr = u2.square(); // (1 - as²)²
 
-    //    // v == ad(1+as²)² - (1-as²)²            where d=-121665/121666
-    //    let v = &(&(-&constants::EDWARDS_D) * &u1.square()) - &u2_sqr;
+        // v == ad(1+as²)² - (1-as²)²            where d=-121665/121666
+        let v = &(&(-&constants::EDWARDS_D) * &u1.square()) - &u2_sqr;
 
-    //    let (ok, I) = (&v * &u2_sqr).invsqrt(); // 1/sqrt(v*u_2²)
+        Some(&v * &u2_sqr) // sqrt(v*u_2²)
+    }
 
-    //    let Dx = &I * &u2;         // 1/sqrt(v)
-    //    let Dy = &I * &(&Dx * &v); // 1/u2
+    pub fn decompress_fini(
+        &self,
+        I: &FieldElement,
+    ) -> Option<RistrettoPoint> {
+        let s = FieldElement::from_bytes(self.as_bytes());
+        let s_bytes_check = s.to_bytes();
+        let s_encoding_is_canonical =
+            &s_bytes_check[..].ct_eq(self.as_bytes());
+        let s_is_negative = s.is_negative();
 
-    //    // x == | 2s/sqrt(v) | == + sqrt(4s²/(ad(1+as²)² - (1-as²)²))
-    //    let mut x = &(&s + &s) * &Dx;
-    //    let x_neg = x.is_negative();
-    //    x.conditional_negate(x_neg);
+        if s_encoding_is_canonical.unwrap_u8() == 0u8 || s_is_negative.unwrap_u8() == 1u8 {
+            return None;
+        }
 
-    //    // y == (1-as²)/(1+as²)
-    //    let y = &u1 * &Dy;
+        // Step 2.  Compute (X:Y:Z:T).
+        let one = FieldElement::one();
+        let ss = s.square();
+        let u1 = &one - &ss;      //  1 + as²
+        let u2 = &one + &ss;      //  1 - as²    where a=-1
+        let u2_sqr = u2.square(); // (1 - as²)²
 
-    //    // t == ((1+as²) sqrt(4s²/(ad(1+as²)² - (1-as²)²)))/(1-as²)
-    //    let t = &x * &y;
+        // v == ad(1+as²)² - (1-as²)²            where d=-121665/121666
+        let v = &(&(-&constants::EDWARDS_D) * &u1.square()) - &u2_sqr;
 
-    //    if ok.unwrap_u8() == 0u8 || t.is_negative().unwrap_u8() == 1u8 || y.is_zero().unwrap_u8() == 1u8 {
-    //        None
-    //    } else {
-    //        Some(RistrettoPoint(EdwardsPoint{X: x, Y: y, Z: one, T: t}))
-    //    }
-    //}
+        let Dx = I * &u2;         // 1/sqrt(v)
+        let Dy = I * &(&Dx * &v); // 1/u2
+
+        // x == | 2s/sqrt(v) | == + sqrt(4s²/(ad(1+as²)² - (1-as²)²))
+        let mut x = &(&s + &s) * &Dx;
+        let x_neg = x.is_negative();
+        x.conditional_negate(x_neg);
+
+        // y == (1-as²)/(1+as²)
+        let y = &u1 * &Dy;
+
+        // t == ((1+as²) sqrt(4s²/(ad(1+as²)² - (1-as²)²)))/(1-as²)
+        let t = &x * &y;
+
+        // ok.unwrap_u8() == 0u8 causes failure of earlier instruction
+        if t.is_negative().unwrap_u8() == 1u8 || y.is_zero().unwrap_u8() == 1u8 {
+            None
+        } else {
+            Some(RistrettoPoint(EdwardsPoint{X: x, Y: y, Z: one, T: t}))
+        }
+    }
 }
 
 impl Identity for CompressedRistretto {

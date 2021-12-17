@@ -1,6 +1,7 @@
 use crate::{
     instruction::*,
     field::*,
+    ristretto::*,
 };
 
 use solana_program::{
@@ -21,14 +22,18 @@ pub fn process_instruction(
     accounts: &[AccountInfo],
     input: &[u8],
 ) -> ProgramResult {
+    let offset = || -> Result<u32, ProgramError> {
+        input[1..5]
+            .try_into()
+            .map(u32::from_le_bytes)
+            .map_err(|_| ProgramError::InvalidArgument)
+    };
     match decode_instruction_type(input)? {
         Curve25519Instruction::WriteBytes => {
-            let offset = u32::from_le_bytes(
-                input[1..5].try_into().map_err(|_| ProgramError::InvalidArgument)?
-            );
+            msg!("WriteBytes");
             process_write_bytes(
                 accounts,
-                offset,
+                offset()?,
                 &input[5..],
             )
         }
@@ -42,41 +47,49 @@ pub fn process_instruction(
         //  ]
         // reads 32 bytes and writes 32
         Curve25519Instruction::InvSqrtInit => {
-            let offset = u32::from_le_bytes(
-                input[1..5].try_into().map_err(|_| ProgramError::InvalidArgument)?
-            );
-            process_inv_sqrt_init(
+            msg!("InvSqrtInit");
+            process_invsqrt_init(
                 accounts,
-                offset,
+                offset()?,
             )
         }
         // reads 32 bytes and writes 96
         Curve25519Instruction::Pow22501P1 => {
-            let offset = u32::from_le_bytes(
-                input[1..5].try_into().map_err(|_| ProgramError::InvalidArgument)?
-            );
+            msg!("Pow22501P1");
             process_pow22501_p1(
                 accounts,
-                offset,
+                offset()?,
             )
         }
         // reads 64 bytes, skips 32, and writes 32
         Curve25519Instruction::Pow22501P2 => {
-            let offset = u32::from_le_bytes(
-                input[1..5].try_into().map_err(|_| ProgramError::InvalidArgument)?
-            );
+            msg!("Pow22501P2");
             process_pow22501_p2(
                 accounts,
-                offset,
+                offset()?,
             )
         }
+        // reads 32 bytes, skips 96, reads 32, and writes 32
         Curve25519Instruction::InvSqrtFini => {
-            let offset = u32::from_le_bytes(
-                input[1..5].try_into().map_err(|_| ProgramError::InvalidArgument)?
-            );
-            process_inv_sqrt_fini(
+            msg!("InvSqrtFini");
+            process_invsqrt_fini(
                 accounts,
-                offset,
+                offset()?,
+            )
+        }
+
+        Curve25519Instruction::DecompressInit => {
+            msg!("DecompressInit");
+            process_decompress_init(
+                accounts,
+                offset()?,
+            )
+        }
+        Curve25519Instruction::DecompressFini => {
+            msg!("DecompressFini");
+            process_decompress_fini(
+                accounts,
+                offset()?,
             )
         }
     }
@@ -99,7 +112,7 @@ fn process_write_bytes(
     Ok(())
 }
 
-fn process_inv_sqrt_init(
+fn process_invsqrt_init(
     accounts: &[AccountInfo],
     offset: u32,
 ) -> ProgramResult {
@@ -128,7 +141,7 @@ fn process_inv_sqrt_init(
     Ok(())
 }
 
-fn process_inv_sqrt_fini(
+fn process_invsqrt_fini(
     accounts: &[AccountInfo],
     offset: u32,
 ) -> ProgramResult {
@@ -161,7 +174,11 @@ fn process_inv_sqrt_fini(
 
     let r = &(&u * &v3) * &pow_p58_output;
 
-    let (_, r) = FieldElement::sqrt_ratio_i(&u, &v, &r);
+    let (ok, r) = FieldElement::sqrt_ratio_i(&u, &v, &r);
+
+    if ok.unwrap_u8() == 0u8 {
+        return Err(ProgramError::InvalidArgument);
+    }
 
     let offset = offset + 32;
     compute_buffer_data[offset..offset+32].copy_from_slice(&r.to_bytes());
@@ -226,6 +243,66 @@ fn process_pow22501_p2(
     let offset = offset + 32; // skip t3
     let offset = offset + 32;
     compute_buffer_data[offset..offset+32].copy_from_slice(&t19.to_bytes());
+
+    Ok(())
+}
+
+fn process_decompress_init(
+    accounts: &[AccountInfo],
+    offset: u32,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let compute_buffer_info = next_account_info(account_info_iter)?;
+    let _system_program_info = next_account_info(account_info_iter)?;
+
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+    let point = CompressedRistretto::from_slice(
+        &compute_buffer_data[offset..offset+32]
+    );
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &point.decompress_init().ok_or(ProgramError::InvalidArgument)?.to_bytes()
+    );
+
+    Ok(())
+}
+
+fn process_decompress_fini(
+    accounts: &[AccountInfo],
+    offset: u32,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let compute_buffer_info = next_account_info(account_info_iter)?;
+    let _system_program_info = next_account_info(account_info_iter)?;
+
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+    let point = CompressedRistretto::from_slice(
+        &compute_buffer_data[offset..offset+32]
+    );
+
+    let offset = offset + 32 * 7;
+    let element = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    msg!("I {:?}", element.to_bytes());
+
+    let res = point.decompress_fini(&element).ok_or(ProgramError::InvalidArgument)?;
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.X.to_bytes());
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.Y.to_bytes());
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.Z.to_bytes());
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.T.to_bytes());
 
     Ok(())
 }

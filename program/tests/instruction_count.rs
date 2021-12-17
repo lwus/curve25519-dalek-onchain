@@ -21,9 +21,6 @@ use {
 async fn test_pow22501_p1() {
     let mut pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
 
-    // Arbitrary number for now
-    pc.set_bpf_compute_max_units(350_000);
-
     let (mut banks_client, payer, recent_blockhash) = pc.start().await;
 
     let rent = banks_client.get_rent().await;
@@ -33,6 +30,23 @@ async fn test_pow22501_p1() {
     let buffer_len = 960; // Arbitrary
     let buffer_minimum_balance_for_rent_exemption = rent
         .minimum_balance(buffer_len);
+
+    let element_bytes = [
+        202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
+        215 , 41  , 243 , 54  , 4   , 27  , 77  , 165 ,
+        16  , 215 , 42  , 27  , 197 , 222 , 243 , 67  ,
+        76  , 183 , 142 , 167 , 62  , 36  , 241 , 1   ,
+    ];
+
+    {
+        let s = curve25519_dalek::ristretto::CompressedRistretto::from_slice(&element_bytes);
+        if let Some(p) = s.decompress() {
+            println!("X {:x?}", p.0.X.to_bytes());
+            println!("Y {:x?}", p.0.Y.to_bytes());
+            println!("Z {:x?}", p.0.Z.to_bytes());
+            println!("T {:x?}", p.0.T.to_bytes());
+        }
+    }
 
     let mut transaction = Transaction::new_with_payer(
         &[
@@ -46,25 +60,35 @@ async fn test_pow22501_p1() {
             instruction::write_bytes(
                 compute_buffer.pubkey(),
                 0,
-                &FieldElement::one().to_bytes()
+                &element_bytes,
             ),
-            instruction::inv_sqrt(
-                instruction::Curve25519Instruction::InvSqrtInit,
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::DecompressInit,
                 compute_buffer.pubkey(),
                 0,
             ),
-            instruction::inv_sqrt(
-                instruction::Curve25519Instruction::Pow22501P1,
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::InvSqrtInit,
                 compute_buffer.pubkey(),
                 32,
             ),
-            instruction::inv_sqrt(
-                instruction::Curve25519Instruction::Pow22501P2,
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::Pow22501P1,
                 compute_buffer.pubkey(),
                 64,
             ),
-            instruction::inv_sqrt(
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::Pow22501P2,
+                compute_buffer.pubkey(),
+                96,
+            ),
+            instruction::run_compute_routine(
                 instruction::Curve25519Instruction::InvSqrtFini,
+                compute_buffer.pubkey(),
+                32,
+            ),
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::DecompressFini,
                 compute_buffer.pubkey(),
                 0,
             ),

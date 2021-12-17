@@ -27,6 +27,9 @@ pub enum Curve25519Instruction {
     Pow22501P1,
     Pow22501P2,
     InvSqrtFini,
+
+    DecompressInit,
+    DecompressFini,
 }
 
 pub fn decode_instruction_type(
@@ -92,7 +95,7 @@ pub fn write_bytes(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn inv_sqrt(
+pub fn run_compute_routine(
     instruction_type: Curve25519Instruction,
     compute_buffer: Pubkey,
     offset: u32,

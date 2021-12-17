@@ -95,6 +95,13 @@ fn process_demo(
         )?;
     }
 
+    let element_bytes = [
+        202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
+        215 , 41  , 243 , 54  , 4   , 27  , 77  , 165 ,
+        16  , 215 , 42  , 27  , 197 , 222 , 243 , 67  ,
+        76  , 183 , 142 , 167 , 62  , 36  , 241 , 1   ,
+    ];
+
     send(
         rpc_client,
         &format!("Computing x^(2^250-1)"),
@@ -104,23 +111,38 @@ fn process_demo(
                 0,
                 &FieldElement::one().to_bytes()
             ),
-            instruction::inv_sqrt(
-                instruction::Curve25519Instruction::InvSqrtInit,
+            instruction::write_bytes(
+                compute_buffer.pubkey(),
+                0,
+                &element_bytes,
+            ),
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::DecompressInit,
                 compute_buffer.pubkey(),
                 0,
             ),
-            instruction::inv_sqrt(
-                instruction::Curve25519Instruction::Pow22501P1,
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::InvSqrtInit,
                 compute_buffer.pubkey(),
                 32,
             ),
-            instruction::inv_sqrt(
-                instruction::Curve25519Instruction::Pow22501P2,
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::Pow22501P1,
                 compute_buffer.pubkey(),
                 64,
             ),
-            instruction::inv_sqrt(
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::Pow22501P2,
+                compute_buffer.pubkey(),
+                96,
+            ),
+            instruction::run_compute_routine(
                 instruction::Curve25519Instruction::InvSqrtFini,
+                compute_buffer.pubkey(),
+                32,
+            ),
+            instruction::run_compute_routine(
+                instruction::Curve25519Instruction::DecompressFini,
                 compute_buffer.pubkey(),
                 0,
             ),
