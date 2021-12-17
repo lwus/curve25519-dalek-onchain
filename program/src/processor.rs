@@ -32,6 +32,14 @@ pub fn process_instruction(
                 &input[5..],
             )
         }
+
+        // [
+        //   x,
+        //   pow_input,         // init
+        //   t17, t13, t3,      // p1
+        //   t19,               // pow_output
+        //   invsqrt_output     // fini
+        //  ]
         // reads 32 bytes and writes 32
         Curve25519Instruction::InvSqrtInit => {
             let offset = u32::from_le_bytes(
@@ -143,7 +151,7 @@ fn process_inv_sqrt_fini(
 
     let pow_p22501_input = &u * &v7;
 
-    let offset = offset + 32 * 4;
+    let offset = offset + 32 * 5;
     let pow_p22501_output = FieldElement::from_bytes(
         compute_buffer_data[offset..offset+32]
             .try_into().map_err(|_| ProgramError::InvalidArgument)?,
