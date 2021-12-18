@@ -73,7 +73,7 @@ fn process_demo(
 
     println!("Compute buffer keypair: {}", compute_buffer.to_base58_string());
 
-    let buffer_len = 960; // Arbitrary
+    let buffer_len = 3200; // Arbitrary
     let buffer_minimum_balance_for_rent_exemption = rpc_client
         .get_minimum_balance_for_rent_exemption(buffer_len)?;
 
@@ -145,6 +145,12 @@ fn process_demo(
                 instruction::Curve25519Instruction::DecompressFini,
                 compute_buffer.pubkey(),
                 0,
+            ),
+            instruction::build_lookup_table(
+                compute_buffer.pubkey(),
+                compute_buffer.pubkey(),
+                32 * 8,
+                32 * 12,
             ),
         ],
         &[payer],

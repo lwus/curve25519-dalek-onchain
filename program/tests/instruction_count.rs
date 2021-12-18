@@ -8,6 +8,7 @@ use {
         signature::Signer,
         system_instruction,
         transaction::Transaction,
+        instruction::AccountMeta,
     },
     curve25519_dalek_onchain::{
         id,
@@ -27,7 +28,7 @@ async fn test_pow22501_p1() {
     let rent = rent.unwrap();
 
     let compute_buffer = Keypair::new();
-    let buffer_len = 960; // Arbitrary
+    let buffer_len = 3200; // Arbitrary
     let buffer_minimum_balance_for_rent_exemption = rent
         .minimum_balance(buffer_len);
 
@@ -91,6 +92,12 @@ async fn test_pow22501_p1() {
                 instruction::Curve25519Instruction::DecompressFini,
                 compute_buffer.pubkey(),
                 0,
+            ),
+            instruction::build_lookup_table(
+                compute_buffer.pubkey(),
+                compute_buffer.pubkey(),
+                32 * 8,
+                32 * 12,
             ),
         ],
         Some(&payer.pubkey()),

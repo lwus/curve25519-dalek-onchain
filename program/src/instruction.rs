@@ -30,6 +30,8 @@ pub enum Curve25519Instruction {
 
     DecompressInit,
     DecompressFini,
+
+    BuildLookupTable,
 }
 
 pub fn decode_instruction_type(
@@ -109,5 +111,25 @@ pub fn run_compute_routine(
         accounts,
         instruction_type,
         &offset,
+    )
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn build_lookup_table(
+    compute_buffer: Pubkey,
+    table_buffer: Pubkey,
+    point_offset: u32,
+    table_offset: u32,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new(compute_buffer, false),
+        AccountMeta::new(table_buffer, false),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    encode_instruction(
+        accounts,
+        Curve25519Instruction::BuildLookupTable,
+        &[point_offset, table_offset],
     )
 }

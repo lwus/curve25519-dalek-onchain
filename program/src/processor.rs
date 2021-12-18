@@ -1,7 +1,11 @@
+#![allow(non_snake_case)]
+
 use crate::{
     instruction::*,
     field::*,
     ristretto::*,
+    window::*,
+    edwards::*,
 };
 
 use solana_program::{
@@ -14,7 +18,6 @@ use solana_program::{
 
 use std::{
     convert::TryInto,
-    mem,
 };
 
 pub fn process_instruction(
@@ -22,11 +25,14 @@ pub fn process_instruction(
     accounts: &[AccountInfo],
     input: &[u8],
 ) -> ProgramResult {
-    let offset = || -> Result<u32, ProgramError> {
-        input[1..5]
+    let bytes_as_u32 = |bytes: &[u8]| -> Result<u32, ProgramError> {
+        bytes
             .try_into()
             .map(u32::from_le_bytes)
             .map_err(|_| ProgramError::InvalidArgument)
+    };
+    let offset = || -> Result<u32, ProgramError> {
+        bytes_as_u32(&input[1..5])
     };
     match decode_instruction_type(input)? {
         Curve25519Instruction::WriteBytes => {
@@ -90,6 +96,15 @@ pub fn process_instruction(
             process_decompress_fini(
                 accounts,
                 offset()?,
+            )
+        }
+
+        Curve25519Instruction::BuildLookupTable => {
+            msg!("BuildLookupTable");
+            process_build_lookup_table(
+                accounts,
+                offset()?,
+                bytes_as_u32(&input[5..9])?,
             )
         }
     }
@@ -303,6 +318,76 @@ fn process_decompress_fini(
     compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.Z.to_bytes());
     let offset = offset + 32;
     compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.T.to_bytes());
+
+    Ok(())
+}
+
+fn process_build_lookup_table(
+    accounts: &[AccountInfo],
+    point_offset: u32,
+    table_offset: u32,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let compute_buffer_info = next_account_info(account_info_iter)?;
+    let table_buffer_info = next_account_info(account_info_iter)?;
+    let _system_program_info = next_account_info(account_info_iter)?;
+
+    let compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    msg!("Reading point offset {}", point_offset);
+
+    let point_offset = point_offset as usize;
+    let X = FieldElement::from_bytes(
+        compute_buffer_data[point_offset..point_offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let point_offset = point_offset + 32;
+    let Y = FieldElement::from_bytes(
+        compute_buffer_data[point_offset..point_offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let point_offset = point_offset + 32;
+    let Z = FieldElement::from_bytes(
+        compute_buffer_data[point_offset..point_offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let point_offset = point_offset + 32;
+    let T = FieldElement::from_bytes(
+        compute_buffer_data[point_offset..point_offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let point = EdwardsPoint{ X, Y, Z, T };
+
+    let table = LookupTable::<ProjectiveNielsPoint>::from(&point);
+
+
+    let mut table_buffer_data = if table_buffer_info.key == compute_buffer_info.key {
+        compute_buffer_data
+    } else {
+        table_buffer_info.try_borrow_mut_data()?
+    };
+    let mut table_offset = table_offset as usize;
+    for i in 0..table.0.len() {
+        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
+            &table.0[i].Y_plus_X.to_bytes());
+        table_offset += 32;
+
+        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
+            &table.0[i].Y_minus_X.to_bytes());
+        table_offset += 32;
+
+        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
+            &table.0[i].Z.to_bytes());
+        table_offset += 32;
+
+        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
+            &table.0[i].T2d.to_bytes());
+        table_offset += 32;
+    }
 
     Ok(())
 }
