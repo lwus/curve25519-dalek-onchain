@@ -153,6 +153,48 @@ impl EdwardsPoint {
         // Unroll last iteration so we can go directly to_extended()
         s.double().to_extended()
     }
+
+    pub fn from_bytes(bytes: &[u8]) -> EdwardsPoint {
+        let mut buffer: [u8; 32] = [0; 32];
+
+        buffer.copy_from_slice(&bytes[..32]);
+        let X = FieldElement::from_bytes(&buffer);
+
+        buffer.copy_from_slice(&bytes[32..64]);
+        let Y = FieldElement::from_bytes(&buffer);
+
+        buffer.copy_from_slice(&bytes[64..96]);
+        let Z = FieldElement::from_bytes(&buffer);
+
+        buffer.copy_from_slice(&bytes[96..]);
+        let T = FieldElement::from_bytes(&buffer);
+
+        EdwardsPoint{ X, Y, Z, T }
+    }
+
+    pub fn to_bytes(&self) -> [u8; 128] {
+        let mut buffer: [u8; 128] = [0; 128];
+
+        buffer[..32].copy_from_slice(&self.X.to_bytes());
+        buffer[32..64].copy_from_slice(&self.Y.to_bytes());
+        buffer[64..96].copy_from_slice(&self.Z.to_bytes());
+        buffer[96..].copy_from_slice(&self.T.to_bytes());
+
+        buffer
+    }
+}
+
+impl ProjectiveNielsPoint {
+    pub fn to_bytes(&self) -> [u8; 128] {
+        let mut buffer: [u8; 128] = [0; 128];
+
+        buffer[..32].copy_from_slice(&self.Y_plus_X.to_bytes());
+        buffer[32..64].copy_from_slice(&self.Y_minus_X.to_bytes());
+        buffer[64..96].copy_from_slice(&self.Z.to_bytes());
+        buffer[96..].copy_from_slice(&self.T2d.to_bytes());
+
+        buffer
+    }
 }
 
 impl CompletedPoint {

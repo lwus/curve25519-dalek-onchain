@@ -337,30 +337,9 @@ fn process_build_lookup_table(
     msg!("Reading point offset {}", point_offset);
 
     let point_offset = point_offset as usize;
-    let X = FieldElement::from_bytes(
-        compute_buffer_data[point_offset..point_offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    let point = EdwardsPoint::from_bytes(
+        &compute_buffer_data[point_offset..point_offset+128]
     );
-
-    let point_offset = point_offset + 32;
-    let Y = FieldElement::from_bytes(
-        compute_buffer_data[point_offset..point_offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let point_offset = point_offset + 32;
-    let Z = FieldElement::from_bytes(
-        compute_buffer_data[point_offset..point_offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let point_offset = point_offset + 32;
-    let T = FieldElement::from_bytes(
-        compute_buffer_data[point_offset..point_offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let point = EdwardsPoint{ X, Y, Z, T };
 
     let table = LookupTable::<ProjectiveNielsPoint>::from(&point);
 
@@ -369,21 +348,9 @@ fn process_build_lookup_table(
     let mut table_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
     let mut table_offset = table_offset as usize;
     for i in 0..table.0.len() {
-        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
-            &table.0[i].Y_plus_X.to_bytes());
-        table_offset += 32;
-
-        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
-            &table.0[i].Y_minus_X.to_bytes());
-        table_offset += 32;
-
-        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
-            &table.0[i].Z.to_bytes());
-        table_offset += 32;
-
-        table_buffer_data[table_offset..table_offset+32].copy_from_slice(
-            &table.0[i].T2d.to_bytes());
-        table_offset += 32;
+        table_buffer_data[table_offset..table_offset+128].copy_from_slice(
+            &table.0[i].to_bytes());
+        table_offset += 128;
     }
 
     Ok(())
