@@ -22,7 +22,7 @@ use {
 async fn test_pow22501_p1() {
     let mut pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
 
-    pc.set_bpf_compute_max_units(350_000);
+    // pc.set_bpf_compute_max_units(350_000);
 
     let (mut banks_client, payer, recent_blockhash) = pc.start().await;
 
@@ -111,18 +111,8 @@ async fn test_pow22501_p1() {
                     curve25519_dalek_onchain::scalar::Scalar::one(),
                     curve25519_dalek_onchain::scalar::Scalar::one(),
                     curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
                 ],  // scalars
                 vec![
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
                     32 * 12,
                     32 * 12,
                     32 * 12,
