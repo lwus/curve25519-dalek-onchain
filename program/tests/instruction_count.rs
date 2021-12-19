@@ -41,91 +41,98 @@ async fn test_pow22501_p1() {
         76  , 183 , 142 , 167 , 62  , 36  , 241 , 1   ,
     ];
 
+    let neg_element_bytes = [
+        56  , 121 , 86  , 54  , 1   , 207 , 49  , 169 ,
+        17  , 26  , 157 , 55  , 224 , 194 , 217 , 15  ,
+        52  , 240 , 214 , 108 , 251 , 96  , 252 , 129 ,
+        242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
+    ];
+
     {
+        use curve25519_dalek::traits::IsIdentity;
+        use curve25519_dalek::traits::MultiscalarMul;
         let s = curve25519_dalek::ristretto::CompressedRistretto::from_slice(&element_bytes);
+        let r = curve25519_dalek::ristretto::CompressedRistretto::from_slice(&neg_element_bytes);
         if let Some(p) = s.decompress() {
-            println!("X {:x?}", p.0.X.to_bytes());
-            println!("Y {:x?}", p.0.Y.to_bytes());
-            println!("Z {:x?}", p.0.Z.to_bytes());
-            println!("T {:x?}", p.0.T.to_bytes());
+            if let Some(q) = r.decompress() {
+                println!("p {:?}", p);
+                println!("q {:?}", q);
+                let v = curve25519_dalek::ristretto::RistrettoPoint::multiscalar_mul(
+                    vec![
+                        curve25519_dalek::scalar::Scalar::one(),
+                        curve25519_dalek::scalar::Scalar::one(),
+                    ],
+                    vec![
+                        p,
+                        q,
+                    ]
+                );
+                println!("{:?}", v);
+            }
         }
     }
 
-    let mut transaction = Transaction::new_with_payer(
-        &[
-            system_instruction::create_account(
-                &payer.pubkey(),
-                &compute_buffer.pubkey(),
-                buffer_minimum_balance_for_rent_exemption,
-                buffer_len as u64,
-                &id(),
-            ),
-            instruction::write_bytes(
-                compute_buffer.pubkey(),
-                0,
-                &element_bytes,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::DecompressInit,
-                compute_buffer.pubkey(),
-                0,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::InvSqrtInit,
-                compute_buffer.pubkey(),
-                32,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::Pow22501P1,
-                compute_buffer.pubkey(),
-                64,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::Pow22501P2,
-                compute_buffer.pubkey(),
-                96,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::InvSqrtFini,
-                compute_buffer.pubkey(),
-                32,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::DecompressFini,
-                compute_buffer.pubkey(),
-                0,
-            ),
-            instruction::build_lookup_table(
-                compute_buffer.pubkey(),
-                // compute_buffer.pubkey(),
-                32 * 8,
-                32 * 12,
-            ),
+    let mut instructions = vec![
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &compute_buffer.pubkey(),
+            buffer_minimum_balance_for_rent_exemption,
+            buffer_len as u64,
+            &id(),
+        ),
+    ];
+
+    instructions.extend_from_slice(
+        instruction::prep_multiscalar_input(
+            compute_buffer.pubkey(),
+            &element_bytes,
+            0,
+        ).as_slice(),
+    );
+
+    instructions.extend_from_slice(
+        instruction::prep_multiscalar_input(
+            compute_buffer.pubkey(),
+            &neg_element_bytes,
+            1,
+        ).as_slice(),
+    );
+
+    use curve25519_dalek_onchain::traits::Identity;
+    instructions.push(
+        instruction::write_bytes(
+            compute_buffer.pubkey(),
+            0,
+            &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
+        ),
+    );
+
+    for i in (0..64).rev() {
+        instructions.push(
             instruction::multiscalar_mul(
                 compute_buffer.pubkey(),
-                32 * 8,  // point offset
-                vec![
+                0,  // point offset
+                vec![ // scalars
                     curve25519_dalek_onchain::scalar::Scalar::one(),
                     curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                ],  // scalars
-                vec![
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
-                    32 * 12,
-                ], // table offsets
-                0, // start
-                1, // end
+                ],
+                vec![ // table offsets
+                    32 * 12 + 128 * 8 * 0,
+                    32 * 12 + 128 * 8 * 1,
+                ],
+                i, // start
+                i+1, // end
             ),
-        ],
+        );
+    }
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
         Some(&payer.pubkey()),
     );
     transaction.sign(&[&payer, &compute_buffer], recent_blockhash);
     banks_client.process_transaction(transaction).await.unwrap();
+
+    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+    println!("{} {:?}", account.data.len(), &account.data[..128]);
 }

@@ -210,3 +210,56 @@ pub fn multiscalar_mul(
         },
     )
 }
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn prep_multiscalar_input(
+    compute_buffer: Pubkey,
+    bytes: &[u8],
+    input_num: u8,
+) -> Vec<Instruction> {
+    let table_offset: u32 =
+        32 * 12                            // decompression state
+        + input_num as u32 * 32 * 4 * 8;   // LUT size 8, 4 field elements per
+    vec![
+        write_bytes(
+            compute_buffer,
+            0,
+            &bytes,
+        ),
+        run_compute_routine(
+            Curve25519Instruction::DecompressInit,
+            compute_buffer,
+            0,
+        ),
+        run_compute_routine(
+            Curve25519Instruction::InvSqrtInit,
+            compute_buffer,
+            32,
+        ),
+        run_compute_routine(
+            Curve25519Instruction::Pow22501P1,
+            compute_buffer,
+            64,
+        ),
+        run_compute_routine(
+            Curve25519Instruction::Pow22501P2,
+            compute_buffer,
+            96,
+        ),
+        run_compute_routine(
+            Curve25519Instruction::InvSqrtFini,
+            compute_buffer,
+            32,
+        ),
+        run_compute_routine(
+            Curve25519Instruction::DecompressFini,
+            compute_buffer,
+            0,
+        ),
+        build_lookup_table(
+            compute_buffer,
+            32 * 7,
+            table_offset,
+        ),
+    ]
+}

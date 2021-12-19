@@ -2,6 +2,7 @@
 
 use core::ops::{Add, Neg};
 use core::borrow::Borrow;
+use core::fmt::Debug;
 
 use subtle::Choice;
 use subtle::ConditionallyNegatable;
@@ -338,6 +339,19 @@ impl<'a> Neg for &'a ProjectiveNielsPoint {
     }
 }
 
+impl<'a> Neg for &'a EdwardsPoint {
+    type Output = EdwardsPoint;
+
+    fn neg(self) -> EdwardsPoint {
+        EdwardsPoint{
+            X: -(&self.X),
+            Y:  self.Y,
+            Z:  self.Z,
+            T: -(&self.T),
+        }
+    }
+}
+
 // ------------------------------------------------------------------------
 // Multiscalar Multiplication impls
 // ------------------------------------------------------------------------
@@ -373,5 +387,16 @@ impl MultiscalarMul for EdwardsPoint {
         let _size = s_lo;
 
         scalar_mul::straus::Straus::multiscalar_mul(scalars, points)
+    }
+}
+
+// ------------------------------------------------------------------------
+// Debug traits
+// ------------------------------------------------------------------------
+
+impl Debug for EdwardsPoint {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+        write!(f, "EdwardsPoint{{\n\tX: {:?},\n\tY: {:?},\n\tZ: {:?},\n\tT: {:?}\n}}",
+               &self.X, &self.Y, &self.Z, &self.T)
     }
 }

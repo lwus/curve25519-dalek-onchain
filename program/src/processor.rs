@@ -50,7 +50,8 @@ pub fn process_instruction(
         //   pow_input,         // init
         //   t17, t13, t3,      // p1
         //   t19,               // pow_output
-        //   invsqrt_output     // fini
+        //   invsqrt_output,    // fini
+        //   decompress_output_start
         //  ]
         // reads 32 bytes and writes 32
         Curve25519Instruction::InvSqrtInit => {
@@ -336,12 +337,12 @@ fn process_build_lookup_table(
 
     let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
 
-    msg!("Reading point offset {}", point_offset);
-
     let point_offset = point_offset as usize;
     let point = EdwardsPoint::from_bytes(
         &compute_buffer_data[point_offset..point_offset+128]
     );
+
+    msg!("Read point {:?}", point);
 
     let table = LookupTable::<ProjectiveNielsPoint>::from(&point);
 
