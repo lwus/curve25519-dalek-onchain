@@ -185,6 +185,24 @@ impl EdwardsPoint {
 }
 
 impl ProjectiveNielsPoint {
+    pub fn from_bytes(bytes: &[u8]) -> ProjectiveNielsPoint {
+        let mut buffer: [u8; 32] = [0; 32];
+
+        buffer.copy_from_slice(&bytes[..32]);
+        let Y_plus_X = FieldElement::from_bytes(&buffer);
+
+        buffer.copy_from_slice(&bytes[32..64]);
+        let Y_minus_X = FieldElement::from_bytes(&buffer);
+
+        buffer.copy_from_slice(&bytes[64..96]);
+        let Z = FieldElement::from_bytes(&buffer);
+
+        buffer.copy_from_slice(&bytes[96..]);
+        let T2d = FieldElement::from_bytes(&buffer);
+
+        ProjectiveNielsPoint{ Y_plus_X, Y_minus_X, Z, T2d }
+    }
+
     pub fn to_bytes(&self) -> [u8; 128] {
         let mut buffer: [u8; 128] = [0; 128];
 

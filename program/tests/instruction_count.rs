@@ -22,6 +22,8 @@ use {
 async fn test_pow22501_p1() {
     let mut pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
 
+    pc.set_bpf_compute_max_units(350_000);
+
     let (mut banks_client, payer, recent_blockhash) = pc.start().await;
 
     let rent = banks_client.get_rent().await;
@@ -98,6 +100,38 @@ async fn test_pow22501_p1() {
                 // compute_buffer.pubkey(),
                 32 * 8,
                 32 * 12,
+            ),
+            instruction::multiscalar_mul(
+                compute_buffer.pubkey(),
+                32 * 8,  // point offset
+                vec![
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                    curve25519_dalek_onchain::scalar::Scalar::one(),
+                ],  // scalars
+                vec![
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                    32 * 12,
+                ], // table offsets
+                0, // start
+                1, // end
             ),
         ],
         Some(&payer.pubkey()),

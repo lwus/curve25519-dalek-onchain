@@ -6,6 +6,7 @@ use crate::{
     ristretto::*,
     window::*,
     edwards::*,
+    scalar,
 };
 
 use solana_program::{
@@ -105,6 +106,13 @@ pub fn process_instruction(
                 accounts,
                 offset()?,
                 bytes_as_u32(&input[5..9])?,
+            )
+        }
+        Curve25519Instruction::MultiscalarMul => {
+            msg!("MultiscalarMul");
+            process_multiscalar_mul(
+                accounts,
+                decode_instruction_data::<MultiscalarMulData>(input)?,
             )
         }
     }
@@ -310,14 +318,8 @@ fn process_decompress_fini(
 
     let res = point.decompress_fini(&element).ok_or(ProgramError::InvalidArgument)?;
 
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.X.to_bytes());
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.Y.to_bytes());
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.Z.to_bytes());
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&res.0.T.to_bytes());
+    compute_buffer_data[offset..offset+128].copy_from_slice(
+        &res.0.to_bytes());
 
     Ok(())
 }
@@ -352,6 +354,72 @@ fn process_build_lookup_table(
             &table.0[i].to_bytes());
         table_offset += 128;
     }
+
+    Ok(())
+}
+
+fn process_multiscalar_mul(
+    accounts: &[AccountInfo],
+    data: &MultiscalarMulData,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let compute_buffer_info = next_account_info(account_info_iter)?;
+    let _system_program_info = next_account_info(account_info_iter)?;
+
+    let num_points = u32::from(data.num_points) as usize;
+    if num_points > MAX_MULTISCALAR_POINTS {
+        msg!("Too many points");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // deserialize lookup tables
+    let mut lookup_tables = Vec::with_capacity(num_points);
+    let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
+
+    for i in 0..num_points {
+        let mut buffer: [ProjectiveNielsPoint; 8] = Default::default();
+        let mut table_offset = u32::from(data.tables[i]) as usize;
+        for j in 0..8 {
+            buffer[j] = ProjectiveNielsPoint::from_bytes(
+                &compute_buffer_data[table_offset..table_offset+128]
+            );
+            table_offset += 128;
+        }
+        lookup_tables.push(LookupTable(buffer));
+    }
+
+    // deserialize scalars
+    let mut scalars = Vec::new();
+    scalars.extend_from_slice(&data.scalars[..num_points]);
+    let scalar_digits_vec: Vec<_> = scalars
+        .into_iter()
+        .map(|s| scalar::Scalar{ bytes: s }.to_radix_16())
+        .collect();
+    let scalar_digits = zeroize::Zeroizing::new(scalar_digits_vec);
+
+    // deserialize point computation
+    let point_offset = u32::from(data.point_offset) as usize;
+    let mut Q = EdwardsPoint::from_bytes(
+        &compute_buffer_data[point_offset..point_offset+128]
+    );
+
+    // run compute
+    for j in (u32::from(data.start)..u32::from(data.end)).rev() {
+        Q = Q.mul_by_pow_2(4);
+        let it = scalar_digits.iter().zip(lookup_tables.iter());
+        for (s_i, lookup_table_i) in it {
+            // R_i = s_{i,j} * P_i
+            let R_i = lookup_table_i.select(s_i[j as usize]);
+            // Q = Q + R_i
+            Q = (&Q + &R_i).to_extended();
+        }
+    }
+
+    // serialize
+    drop(compute_buffer_data);
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+    compute_buffer_data[point_offset..point_offset+128].copy_from_slice(
+        &Q.to_bytes());
 
     Ok(())
 }
