@@ -329,10 +329,10 @@ fn process_build_lookup_table(
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let compute_buffer_info = next_account_info(account_info_iter)?;
-    let table_buffer_info = next_account_info(account_info_iter)?;
+    // let table_buffer_info = next_account_info(account_info_iter)?;
     let _system_program_info = next_account_info(account_info_iter)?;
 
-    let compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+    let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
 
     msg!("Reading point offset {}", point_offset);
 
@@ -365,11 +365,8 @@ fn process_build_lookup_table(
     let table = LookupTable::<ProjectiveNielsPoint>::from(&point);
 
 
-    let mut table_buffer_data = if table_buffer_info.key == compute_buffer_info.key {
-        compute_buffer_data
-    } else {
-        table_buffer_info.try_borrow_mut_data()?
-    };
+    drop(compute_buffer_data);
+    let mut table_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
     let mut table_offset = table_offset as usize;
     for i in 0..table.0.len() {
         table_buffer_data[table_offset..table_offset+32].copy_from_slice(

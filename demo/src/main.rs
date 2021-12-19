@@ -148,7 +148,7 @@ fn process_demo(
             ),
             instruction::build_lookup_table(
                 compute_buffer.pubkey(),
-                compute_buffer.pubkey(),
+                // compute_buffer.pubkey(),
                 32 * 8,
                 32 * 12,
             ),

@@ -95,7 +95,7 @@ async fn test_pow22501_p1() {
             ),
             instruction::build_lookup_table(
                 compute_buffer.pubkey(),
-                compute_buffer.pubkey(),
+                // compute_buffer.pubkey(),
                 32 * 8,
                 32 * 12,
             ),
