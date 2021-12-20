@@ -73,12 +73,51 @@ fn process_demo(
 
     println!("Compute buffer keypair: {}", compute_buffer.to_base58_string());
 
-    let buffer_len = 3200; // Arbitrary
+    let element_bytes = [
+        202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
+        215 , 41  , 243 , 54  , 4   , 27  , 77  , 165 ,
+        16  , 215 , 42  , 27  , 197 , 222 , 243 , 67  ,
+        76  , 183 , 142 , 167 , 62  , 36  , 241 , 1   ,
+    ];
+
+    let neg_element_bytes = [
+        56  , 121 , 86  , 54  , 1   , 207 , 49  , 169 ,
+        17  , 26  , 157 , 55  , 224 , 194 , 217 , 15  ,
+        52  , 240 , 214 , 108 , 251 , 96  , 252 , 129 ,
+        242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
+    ];
+
+    let scalars = vec![
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+    ];
+
+    let points = vec![
+        element_bytes,
+        neg_element_bytes,
+        element_bytes,
+        neg_element_bytes,
+        element_bytes,
+        neg_element_bytes,
+    ];
+
+    let num_inputs = scalars.len() as u32;
+    let tables_start = 32 * 12;
+
+    let buffer_len = (tables_start + num_inputs * (128 * 8 + 32)) as usize;
     let buffer_minimum_balance_for_rent_exemption = rpc_client
         .get_minimum_balance_for_rent_exemption(buffer_len)?;
 
+    assert_eq!(scalars.len(), points.len());
+
     let mut compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey());
-    if compute_buffer_data.is_err() {
+    if let Ok(data) = compute_buffer_data {
+        assert!(data.len() >= buffer_len);
+    } else {
         send(
             rpc_client,
             &format!("Creating compute buffer"),
@@ -95,38 +134,44 @@ fn process_demo(
         )?;
     }
 
-    let element_bytes = [
-        202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
-        215 , 41  , 243 , 54  , 4   , 27  , 77  , 165 ,
-        16  , 215 , 42  , 27  , 197 , 222 , 243 , 67  ,
-        76  , 183 , 142 , 167 , 62  , 36  , 241 , 1   ,
-    ];
-
-    let neg_element_bytes = [
-        56  , 121 , 86  , 54  , 1   , 207 , 49  , 169 ,
-        17  , 26  , 157 , 55  , 224 , 194 , 217 , 15  ,
-        52  , 240 , 214 , 108 , 251 , 96  , 252 , 129 ,
-        242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
-    ];
-
     let mut instructions = vec![];
 
-    instructions.extend_from_slice(
-        instruction::prep_multiscalar_input(
+    // write the point lookup tables
+    for i in 0..num_inputs {
+        instructions.extend_from_slice(
+            instruction::prep_multiscalar_input(
+                compute_buffer.pubkey(),
+                &points[i as usize],
+                i as u8,
+                tables_start,
+            ).as_slice(),
+        );
+    }
+
+    send(
+        rpc_client,
+        &format!("Prepping mul input points"),
+        instructions.as_slice(),
+        &[payer],
+    )?;
+    instructions.clear();
+
+
+    // write the scalars
+    let tables_end = tables_start + num_inputs * 128 * 8;
+    let mut scalars_as_bytes = vec![];
+    for i in 0..num_inputs {
+        scalars_as_bytes.extend_from_slice(&scalars[i as usize].bytes);
+    }
+    instructions.push(
+        instruction::write_bytes(
             compute_buffer.pubkey(),
-            &element_bytes,
-            0,
-        ).as_slice(),
+            tables_end,
+            scalars_as_bytes.as_slice(),
+        ),
     );
 
-    instructions.extend_from_slice(
-        instruction::prep_multiscalar_input(
-            compute_buffer.pubkey(),
-            &neg_element_bytes,
-            1,
-        ).as_slice(),
-    );
-
+    // write the result point initial state
     use curve25519_dalek_onchain::traits::Identity;
     instructions.push(
         instruction::write_bytes(
@@ -138,35 +183,37 @@ fn process_demo(
 
     send(
         rpc_client,
-        &format!("Prepping mul inputs"),
+        &format!("Prepping mul scalars"),
         instructions.as_slice(),
         &[payer],
     )?;
 
-    for i in (0..8).rev() {
+
+    let instructions_per_tx = 32;
+    let transactions = 64 / instructions_per_tx;
+    for i in (0..transactions).rev() {
         instructions.clear();
-        for j in (0..8).rev() {
-            let iter = i * 8 + j;
+        for j in (0..instructions_per_tx).rev() {
+            let iter = i * instructions_per_tx + j;
             instructions.push(
                 instruction::multiscalar_mul(
                     compute_buffer.pubkey(),
-                    0,  // point offset
-                    vec![ // scalars
-                        curve25519_dalek_onchain::scalar::Scalar::one(),
-                        curve25519_dalek_onchain::scalar::Scalar::one(),
-                    ],
-                    vec![ // table offsets
-                        32 * 12 + 128 * 8 * 0,
-                        32 * 12 + 128 * 8 * 1,
-                    ],
                     iter, // start
                     iter+1, // end
+                    num_inputs as u8,
+                    tables_end, // scalars_offset
+                    tables_start, // tables_offset
+                    0,  // result_offset
                 ),
             );
         }
         send(
             rpc_client,
-            &format!("Iterations {}..{}", i * 8, i * 8 + 7),
+            &format!(
+                "Iterations {}..{}",
+                i * instructions_per_tx,
+                (i + 1) * instructions_per_tx - 1
+            ),
             instructions.as_slice(),
             &[payer],
         )?;
