@@ -5,6 +5,7 @@ use {
     num_traits::{FromPrimitive},
     solana_program::{
         program_error::ProgramError,
+        pubkey::Pubkey,
     },
 };
 
@@ -13,7 +14,6 @@ use {
     num_traits::ToPrimitive,
     solana_program::{
         instruction::{AccountMeta, Instruction},
-        pubkey::Pubkey,
     },
     std::convert::TryInto,
 };
@@ -26,11 +26,12 @@ pub enum Curve25519Instruction {
     InitializeComputeBuffer,
     WriteBytes,
     CrankCompute,
+    CloseBuffer,
 }
 
 // TODO: move to state
-#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, FromPrimitive, ToPrimitive)]
+#[repr(u8)]
 pub enum Key {
     Uninitialized,
     InputBufferV1,
@@ -44,19 +45,22 @@ pub enum Key {
 pub struct ComputeHeader {
     pub key: Key,
     pub instruction_num: u32,
+    pub authority: Pubkey,
 }
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct InputHeader {
     pub key: Key,
+    pub authority: Pubkey,
 }
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct InstructionHeader {
     pub key: Key,
+    pub authority: Pubkey,
 }
 
-pub const HEADER_SIZE: usize = 32;
+pub const HEADER_SIZE: usize = 64;
 pub const INSTRUCTION_SIZE: usize = 16;
 
 
@@ -178,10 +182,12 @@ pub fn write_bytes(
 #[cfg(not(target_arch = "bpf"))]
 pub fn initialize_buffer(
     buffer: Pubkey,
+    authority: Pubkey,
     instruction_type: Curve25519Instruction,
 ) -> Instruction {
     let accounts = vec![
         AccountMeta::new(buffer, false),
+        AccountMeta::new_readonly(authority, true),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
@@ -189,6 +195,24 @@ pub fn initialize_buffer(
         program_id: crate::ID,
         accounts,
         data: vec![ToPrimitive::to_u8(&instruction_type).unwrap()],
+    }
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn close_buffer(
+    buffer: Pubkey,
+    authority: Pubkey,
+) -> Instruction {
+    let accounts = vec![
+        AccountMeta::new(buffer, false),
+        AccountMeta::new_readonly(authority, true),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: vec![ToPrimitive::to_u8(&Curve25519Instruction::CloseBuffer).unwrap()],
     }
 }
 

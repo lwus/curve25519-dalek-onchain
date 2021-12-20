@@ -97,14 +97,17 @@ async fn test_pow22501_p1() {
         ),
         instruction::initialize_buffer(
             instruction_buffer.pubkey(),
+            payer.pubkey(),
             instruction::Curve25519Instruction::InitializeInstructionBuffer,
         ),
         instruction::initialize_buffer(
             input_buffer.pubkey(),
+            payer.pubkey(),
             instruction::Curve25519Instruction::InitializeInputBuffer,
         ),
         instruction::initialize_buffer(
             compute_buffer.pubkey(),
+            payer.pubkey(),
             instruction::Curve25519Instruction::InitializeComputeBuffer,
         ),
     ];
@@ -187,7 +190,7 @@ async fn test_pow22501_p1() {
     banks_client.process_transaction(transaction).await.unwrap();
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
-    let mul_result_bytes = &account.data[32..128+32];
+    let mul_result_bytes = &account.data[instruction::HEADER_SIZE..128+instruction::HEADER_SIZE];
     let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
         mul_result_bytes
     );
@@ -196,4 +199,27 @@ async fn test_pow22501_p1() {
 
     use curve25519_dalek_onchain::traits::IsIdentity;
     assert!(curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
+
+
+
+
+    let mut transaction = Transaction::new_with_payer(
+        &[
+            instruction::close_buffer(
+                instruction_buffer.pubkey(),
+                payer.pubkey(),
+            ),
+            instruction::close_buffer(
+                input_buffer.pubkey(),
+                payer.pubkey(),
+            ),
+            instruction::close_buffer(
+                compute_buffer.pubkey(),
+                payer.pubkey(),
+            ),
+        ],
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
 }

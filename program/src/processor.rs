@@ -18,6 +18,7 @@ use solana_program::{
 };
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use num_traits::{FromPrimitive};
 use std::{
     borrow::Borrow,
     convert::TryInto,
@@ -42,24 +43,37 @@ pub fn process_instruction(
             msg!("InitializeInstructionBuffer");
             process_initialize_buffer(
                 accounts,
-                InstructionHeader{ key: Key::InstructionBufferV1 },
+                |authority| InstructionHeader {
+                    key: Key::InstructionBufferV1,
+                    authority,
+                },
             )
         }
         Curve25519Instruction::InitializeInputBuffer => {
             msg!("InitializeInputBuffer");
             process_initialize_buffer(
                 accounts,
-                InputHeader{ key: Key::InputBufferV1 },
+                |authority| InputHeader {
+                    key: Key::InputBufferV1,
+                    authority,
+                },
             )
         }
         Curve25519Instruction::InitializeComputeBuffer => {
-            msg!("InitializeComputeBuffer ");
+            msg!("InitializeComputeBuffer");
             process_initialize_buffer(
                 accounts,
-                ComputeHeader{
+                |authority| ComputeHeader {
                     key: Key::ComputeBufferV1,
                     instruction_num: 0,
+                    authority,
                 },
+            )
+        }
+        Curve25519Instruction::CloseBuffer => {
+            msg!("CloseBuffer");
+            process_close_buffer(
+                accounts,
             )
         }
         Curve25519Instruction::WriteBytes => {
@@ -89,7 +103,7 @@ fn process_dsl_instruction(
     let compute_buffer_info = next_account_info(account_info_iter)?;
 
     if *instruction_buffer_info.owner != crate::ID {
-        msg!("Bad instruction buffer");
+        msg!("Bad instruction buffer {} vs {}", instruction_buffer_info.owner, crate::ID);
         return Err(ProgramError::InvalidArgument);
     }
     if *input_buffer_info.owner != crate::ID {
@@ -221,13 +235,22 @@ fn process_dsl_instruction(
     }
 }
 
-fn process_initialize_buffer<T: BorshSerialize>(
+fn process_initialize_buffer<F, T: BorshSerialize>(
     accounts: &[AccountInfo],
-    header: T,
-) -> ProgramResult {
+    header_fn: F,
+) -> ProgramResult
+where
+    F: FnOnce(Pubkey) -> T,
+{
     let account_info_iter = &mut accounts.iter();
     let buffer_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
     let _system_program_info = next_account_info(account_info_iter)?;
+
+    if !authority_info.is_signer {
+        msg!("Authority is not a signer");
+        return Err(ProgramError::InvalidArgument);
+    }
 
     let mut buffer_data = buffer_info.try_borrow_mut_data()?;
 
@@ -237,7 +260,61 @@ fn process_initialize_buffer<T: BorshSerialize>(
     }
 
     // TODO: does this write correctly?
-    header.serialize(&mut *buffer_data)?;
+    header_fn(*authority_info.key).serialize(&mut *buffer_data)?;
+
+    Ok(())
+}
+
+fn process_close_buffer(
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let buffer_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
+    let _system_program_info = next_account_info(account_info_iter)?;
+
+    if !authority_info.is_signer {
+        msg!("Authority is not a signer");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let buffer_data = buffer_info.try_borrow_data()?;
+    let mut buffer_ptr: &[u8] = *buffer_data;
+
+    match Key::from_u8(buffer_data[0]).ok_or(ProgramError::InvalidArgument)? {
+        Key::InputBufferV1 => {
+            let header = InputHeader::deserialize(&mut buffer_ptr)?;
+            if header.authority != *authority_info.key {
+                msg!("Invalid input buffer authority");
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        Key::ComputeBufferV1 => {
+            let header = ComputeHeader::deserialize(&mut buffer_ptr)?;
+            if header.authority != *authority_info.key {
+                msg!("Invalid compute buffer authority");
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        Key::InstructionBufferV1 => {
+            let header = InstructionHeader::deserialize(&mut buffer_ptr)?;
+            if header.authority != *authority_info.key {
+                msg!("Invalid instruction buffer authority");
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        Key::Uninitialized => {
+            msg!("Buffer not initialized");
+            return Err(ProgramError::InvalidArgument);
+        }
+    }
+
+    let dest_starting_lamports = authority_info.lamports();
+    **authority_info.lamports.borrow_mut() = dest_starting_lamports
+        .checked_add(buffer_info.lamports())
+        .ok_or(ProgramError::InvalidArgument)?;
+
+    **buffer_info.lamports.borrow_mut() = 0;
 
     Ok(())
 }

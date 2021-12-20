@@ -15,4 +15,4 @@ pub mod scalar;
 pub mod traits;
 pub mod window;
 
-solana_program::declare_id!("8cJuuSckrSGNEXkPeDVNqmvKY3ZMWReSCnu8W4QGetzB");
+solana_program::declare_id!("5wsqk1gtzFewn4Rx3w9uyYBYUPZJPr2uLTNJ7BGFav5g");

@@ -152,6 +152,7 @@ fn process_demo(
                     ),
                     instruction::initialize_buffer(
                         buffer.pubkey(),
+                        payer.pubkey(),
                         instruction_type,
                     ),
                 ],
@@ -277,7 +278,7 @@ fn process_demo(
     }
 
     let compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey())?;
-    let mul_result_bytes = &compute_buffer_data[32..128+32];
+    let mul_result_bytes = &compute_buffer_data[instruction::HEADER_SIZE..128+instruction::HEADER_SIZE];
     let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
         mul_result_bytes
     );
@@ -286,6 +287,26 @@ fn process_demo(
 
     use curve25519_dalek_onchain::traits::IsIdentity;
     assert!(curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
+
+    send(
+        rpc_client,
+        &format!("Closing buffers"),
+        &[
+            instruction::close_buffer(
+                instruction_buffer.pubkey(),
+                payer.pubkey(),
+            ),
+            instruction::close_buffer(
+                input_buffer.pubkey(),
+                payer.pubkey(),
+            ),
+            instruction::close_buffer(
+                compute_buffer.pubkey(),
+                payer.pubkey(),
+            ),
+        ],
+        &[payer],
+    )?;
 
     Ok(())
 }
