@@ -38,7 +38,7 @@ pub enum Curve25519Instruction {
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
-pub const MAX_MULTISCALAR_POINTS: usize = 2;
+pub const MAX_MULTISCALAR_POINTS: usize = 6;
 
 /// The standard `u32` can cause alignment issues when placed in a `Pod`, define a replacement that
 /// is usable in all `Pod`s
@@ -60,15 +60,16 @@ impl From<PodU32> for u32 {
 #[repr(C)]
 pub struct MultiscalarMulData {
     // reversed
-    pub start: PodU32,
-    pub end: PodU32,
+    pub start: u8,
+    pub end: u8,
 
-    pub point_offset: PodU32,
-    pub num_points: PodU32,
-    // TODO: write into compute buffer?
-    pub scalars: [[u8; 32]; MAX_MULTISCALAR_POINTS],
-    // offsets to LUTs computed from points
-    pub tables: [PodU32; MAX_MULTISCALAR_POINTS],
+    pub num_inputs: u8,
+    pub scalars_offset: PodU32,
+    // Offsets to LUTs computed from points. Expected to be a packed array
+    pub tables_offset: PodU32,
+
+    // Result of previous computation and where this result will be stored
+    pub result_offset: PodU32,
 }
 
 pub fn decode_instruction_type(
@@ -174,39 +175,30 @@ pub fn build_lookup_table(
 #[cfg(not(target_arch = "bpf"))]
 pub fn multiscalar_mul(
     compute_buffer: Pubkey,
-    point_offset: u32,
-    scalars: Vec<scalar::Scalar>,
-    tables: Vec<u32>,
-    start: u32,
-    end: u32,
+    start: u8,
+    end: u8,
+    num_inputs: u8,
+    scalars_offset: u32,
+    tables_offset: u32,
+    result_offset: u32,
 ) -> Instruction {
     let mut accounts = vec![
         AccountMeta::new(compute_buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
-    assert_eq!(scalars.len(), tables.len());
-    assert!(scalars.len() <= MAX_MULTISCALAR_POINTS);
-    let num_points = scalars.len();
-
-    let mut scalars_array = [[0; 32]; MAX_MULTISCALAR_POINTS];
-    let raw_scalars: Vec<_> = scalars.into_iter().map(|s| s.bytes).collect();
-    scalars_array[..num_points].copy_from_slice(raw_scalars.as_slice());
-
-    let mut tables_array = [PodU32([0; 4]); MAX_MULTISCALAR_POINTS];
-    let pod_offsets: Vec<_> = tables.into_iter().map(|s| s.into()).collect();
-    tables_array[..num_points].copy_from_slice(pod_offsets.as_slice());
+    assert!(usize::from(num_inputs) <= MAX_MULTISCALAR_POINTS);
 
     encode_instruction(
         accounts,
         Curve25519Instruction::MultiscalarMul,
         &MultiscalarMulData {
-            start: start.into(),
-            end: end.into(),
-            point_offset: point_offset.into(),
-            num_points: PodU32::from(num_points as u32),
-            scalars: scalars_array,
-            tables: tables_array,
+            start: start,
+            end: end,
+            num_inputs: num_inputs,
+            scalars_offset: scalars_offset.into(),
+            tables_offset: tables_offset.into(),
+            result_offset: result_offset.into(),
         },
     )
 }
@@ -216,9 +208,10 @@ pub fn prep_multiscalar_input(
     compute_buffer: Pubkey,
     bytes: &[u8],
     input_num: u8,
+    state_offset: u32,  // should leave at least room for decompression (32 * 11)
 ) -> Vec<Instruction> {
     let table_offset: u32 =
-        32 * 12                            // decompression state
+        state_offset                       // decompression state
         + input_num as u32 * 32 * 4 * 8;   // LUT size 8, 4 field elements per
     vec![
         write_bytes(

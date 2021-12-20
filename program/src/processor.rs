@@ -367,19 +367,20 @@ fn process_multiscalar_mul(
     let compute_buffer_info = next_account_info(account_info_iter)?;
     let _system_program_info = next_account_info(account_info_iter)?;
 
-    let num_points = u32::from(data.num_points) as usize;
-    if num_points > MAX_MULTISCALAR_POINTS {
+    let num_inputs = data.num_inputs as usize;
+    if num_inputs > MAX_MULTISCALAR_POINTS {
         msg!("Too many points");
         return Err(ProgramError::InvalidArgument);
     }
 
     // deserialize lookup tables
-    let mut lookup_tables = Vec::with_capacity(num_points);
+    let mut lookup_tables = Vec::with_capacity(num_inputs);
     let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
 
-    for i in 0..num_points {
+    let mut table_offset = u32::from(data.tables_offset) as usize;
+    for i in 0..num_inputs {
         let mut buffer: [ProjectiveNielsPoint; 8] = Default::default();
-        let mut table_offset = u32::from(data.tables[i]) as usize;
+        // table_offset tracks the ProjectiveNielsPoint offset inside the loop
         for j in 0..8 {
             buffer[j] = ProjectiveNielsPoint::from_bytes(
                 &compute_buffer_data[table_offset..table_offset+128]
@@ -390,22 +391,24 @@ fn process_multiscalar_mul(
     }
 
     // deserialize scalars
-    let mut scalars = Vec::new();
-    scalars.extend_from_slice(&data.scalars[..num_points]);
-    let scalar_digits_vec: Vec<_> = scalars
-        .into_iter()
-        .map(|s| scalar::Scalar{ bytes: s }.to_radix_16())
-        .collect();
+    // TODO: just encode the radix_16 values directly?
+    let mut scalar_offset = u32::from(data.scalars_offset) as usize;
+    let mut scalar_digits_vec = Vec::with_capacity(num_inputs);
+    let mut bytes = [0; 32];
+    for i in 0..num_inputs {
+        bytes.copy_from_slice(&compute_buffer_data[scalar_offset..scalar_offset+32]);
+        scalar_digits_vec.push(scalar::Scalar{ bytes }.to_radix_16());
+    }
     let scalar_digits = zeroize::Zeroizing::new(scalar_digits_vec);
 
     // deserialize point computation
-    let point_offset = u32::from(data.point_offset) as usize;
+    let result_offset = u32::from(data.result_offset) as usize;
     let mut Q = EdwardsPoint::from_bytes(
-        &compute_buffer_data[point_offset..point_offset+128]
+        &compute_buffer_data[result_offset..result_offset+128]
     );
 
     // run compute
-    for j in (u32::from(data.start)..u32::from(data.end)).rev() {
+    for j in (data.start..data.end).rev() {
         Q = Q.mul_by_pow_2(4);
         let it = scalar_digits.iter().zip(lookup_tables.iter());
         for (s_i, lookup_table_i) in it {
@@ -419,7 +422,7 @@ fn process_multiscalar_mul(
     // serialize
     drop(compute_buffer_data);
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-    compute_buffer_data[point_offset..point_offset+128].copy_from_slice(
+    compute_buffer_data[result_offset..result_offset+128].copy_from_slice(
         &Q.to_bytes());
 
     Ok(())

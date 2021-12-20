@@ -30,9 +30,6 @@ async fn test_pow22501_p1() {
     let rent = rent.unwrap();
 
     let compute_buffer = Keypair::new();
-    let buffer_len = 3200; // Arbitrary
-    let buffer_minimum_balance_for_rent_exemption = rent
-        .minimum_balance(buffer_len);
 
     let element_bytes = [
         202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
@@ -48,29 +45,32 @@ async fn test_pow22501_p1() {
         242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
     ];
 
-    {
-        use curve25519_dalek::traits::IsIdentity;
-        use curve25519_dalek::traits::MultiscalarMul;
-        let s = curve25519_dalek::ristretto::CompressedRistretto::from_slice(&element_bytes);
-        let r = curve25519_dalek::ristretto::CompressedRistretto::from_slice(&neg_element_bytes);
-        if let Some(p) = s.decompress() {
-            if let Some(q) = r.decompress() {
-                println!("p {:?}", p);
-                println!("q {:?}", q);
-                let v = curve25519_dalek::ristretto::RistrettoPoint::multiscalar_mul(
-                    vec![
-                        curve25519_dalek::scalar::Scalar::one(),
-                        curve25519_dalek::scalar::Scalar::one(),
-                    ],
-                    vec![
-                        p,
-                        q,
-                    ]
-                );
-                println!("{:?}", v);
-            }
-        }
-    }
+    let scalars = vec![
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+        curve25519_dalek_onchain::scalar::Scalar::one(),
+    ];
+
+    let points = vec![
+        element_bytes,
+        neg_element_bytes,
+        element_bytes,
+        neg_element_bytes,
+        element_bytes,
+        neg_element_bytes,
+    ];
+
+    let num_inputs = scalars.len() as u32;
+    let tables_start = 32 * 12;
+
+    let buffer_len = (tables_start + num_inputs * (128 * 8 + 32)) as usize;
+    let buffer_minimum_balance_for_rent_exemption = rent
+        .minimum_balance(buffer_len);
+
+    assert_eq!(scalars.len(), points.len());
 
     let mut instructions = vec![
         system_instruction::create_account(
@@ -82,22 +82,33 @@ async fn test_pow22501_p1() {
         ),
     ];
 
-    instructions.extend_from_slice(
-        instruction::prep_multiscalar_input(
+    // write the point lookup tables
+    for i in 0..num_inputs {
+        instructions.extend_from_slice(
+            instruction::prep_multiscalar_input(
+                compute_buffer.pubkey(),
+                &points[i as usize],
+                i as u8,
+                tables_start,
+            ).as_slice(),
+        );
+    }
+
+    // write the scalars
+    let tables_end = tables_start + num_inputs * 128 * 8;
+    let mut scalars_as_bytes = vec![];
+    for i in 0..num_inputs {
+        scalars_as_bytes.extend_from_slice(&scalars[i as usize].bytes);
+    }
+    instructions.push(
+        instruction::write_bytes(
             compute_buffer.pubkey(),
-            &element_bytes,
-            0,
-        ).as_slice(),
+            tables_end,
+            scalars_as_bytes.as_slice(),
+        ),
     );
 
-    instructions.extend_from_slice(
-        instruction::prep_multiscalar_input(
-            compute_buffer.pubkey(),
-            &neg_element_bytes,
-            1,
-        ).as_slice(),
-    );
-
+    // write the result point initial state
     use curve25519_dalek_onchain::traits::Identity;
     instructions.push(
         instruction::write_bytes(
@@ -111,17 +122,12 @@ async fn test_pow22501_p1() {
         instructions.push(
             instruction::multiscalar_mul(
                 compute_buffer.pubkey(),
-                0,  // point offset
-                vec![ // scalars
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                    curve25519_dalek_onchain::scalar::Scalar::one(),
-                ],
-                vec![ // table offsets
-                    32 * 12 + 128 * 8 * 0,
-                    32 * 12 + 128 * 8 * 1,
-                ],
                 i, // start
                 i+1, // end
+                num_inputs as u8,
+                tables_end, // scalars_offset
+                tables_start, // tables_offset
+                0,  // result_offset
             ),
         );
     }

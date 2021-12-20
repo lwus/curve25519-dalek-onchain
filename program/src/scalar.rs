@@ -190,7 +190,7 @@ pub struct Scalar {
     //
     // XXX This is pub(crate) so we can write literal constants.  If const fns were stable, we could
     //     make the Scalar constructors const fns and use those instead.
-    pub(crate) bytes: [u8; 32],
+    pub bytes: [u8; 32],
 }
 
 impl Scalar {
