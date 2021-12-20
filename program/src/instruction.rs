@@ -1,6 +1,5 @@
 use {
     bytemuck::{Pod, Zeroable},
-    crate::scalar,
     num_derive::{FromPrimitive, ToPrimitive},
     num_traits::{FromPrimitive},
     solana_program::{

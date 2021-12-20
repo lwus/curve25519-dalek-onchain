@@ -17,15 +17,6 @@ use super::scalar::Scalar52;
 // use edwards::{EdwardsBasepointTable, EdwardsPoint};
 // use window::{LookupTable, NafLookupTable8};
 
-/// The value of minus one, equal to `-&FieldElement::one()`
-pub(crate) const MINUS_ONE: FieldElement51 = FieldElement51([
-    2251799813685228,
-    2251799813685247,
-    2251799813685247,
-    2251799813685247,
-    2251799813685247
-]);
-
 /// Edwards `d` value, equal to `-121665/121666 mod p`.
 pub(crate) const EDWARDS_D: FieldElement51 = FieldElement51([
     929955233495203,
@@ -42,42 +33,6 @@ pub(crate) const EDWARDS_D2: FieldElement51 = FieldElement51([
     1072319116312658,
     1815898335770999,
     633789495995903,
-]);
-
-/// One minus edwards `d` value squared, equal to `(1 - (-121665/121666) mod p) pow 2`
-pub(crate) const ONE_MINUS_EDWARDS_D_SQUARED: FieldElement51 = FieldElement51([
-    1136626929484150,
-    1998550399581263,
-    496427632559748,
-    118527312129759,
-    45110755273534
-]);
-
-/// Edwards `d` value minus one squared, equal to `(((-121665/121666) mod p) - 1) pow 2`
-pub(crate) const EDWARDS_D_MINUS_ONE_SQUARED: FieldElement51 = FieldElement51([
-    1507062230895904,
-    1572317787530805,
-    683053064812840,
-    317374165784489,
-    1572899562415810
-]);
-
-/// `= sqrt(a*d - 1)`, where `a = -1 (mod p)`, `d` are the Edwards curve parameters.
-pub(crate) const SQRT_AD_MINUS_ONE: FieldElement51 = FieldElement51([
-    2241493124984347,
-    425987919032274,
-    2207028919301688,
-    1220490630685848,
-    974799131293748,
-]);
-
-/// `= 1/sqrt(a-d)`, where `a = -1 (mod p)`, `d` are the Edwards curve parameters.
-pub(crate) const INVSQRT_A_MINUS_D: FieldElement51 = FieldElement51([
-    278908739862762,
-    821645201101625,
-    8113234426968,
-    1777959178193151,
-    2118520810568447,
 ]);
 
 /// Precomputed value of one of the square roots of -1 (mod p)

@@ -5,7 +5,6 @@ use core::borrow::Borrow;
 use core::fmt::Debug;
 
 use subtle::Choice;
-use subtle::ConditionallyNegatable;
 use subtle::ConditionallySelectable;
 
 use zeroize::Zeroize;

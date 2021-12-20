@@ -18,7 +18,6 @@ use core::borrow::Borrow;
 use crate::edwards::EdwardsPoint;
 use crate::scalar::Scalar;
 use crate::traits::MultiscalarMul;
-use crate::traits::VartimeMultiscalarMul;
 
 #[allow(unused_imports)]
 use std::prelude::*;

@@ -378,7 +378,7 @@ fn process_multiscalar_mul(
     let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
 
     let mut table_offset = u32::from(data.tables_offset) as usize;
-    for i in 0..num_inputs {
+    for _i in 0..num_inputs {
         let mut buffer: [ProjectiveNielsPoint; 8] = Default::default();
         // table_offset tracks the ProjectiveNielsPoint offset inside the loop
         for j in 0..8 {
@@ -395,9 +395,10 @@ fn process_multiscalar_mul(
     let mut scalar_offset = u32::from(data.scalars_offset) as usize;
     let mut scalar_digits_vec = Vec::with_capacity(num_inputs);
     let mut bytes = [0; 32];
-    for i in 0..num_inputs {
+    for _i in 0..num_inputs {
         bytes.copy_from_slice(&compute_buffer_data[scalar_offset..scalar_offset+32]);
         scalar_digits_vec.push(scalar::Scalar{ bytes }.to_radix_16());
+        scalar_offset += 32;
     }
     let scalar_digits = zeroize::Zeroizing::new(scalar_digits_vec);
 
