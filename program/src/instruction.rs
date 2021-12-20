@@ -55,12 +55,14 @@ pub struct ComputeHeader {
 pub struct InputHeader {
     pub key: Key,
     pub authority: Pubkey,
+    pub finalized: bool,
 }
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct InstructionHeader {
     pub key: Key,
     pub authority: Pubkey,
+    pub finalized: bool,
 }
 
 pub const HEADER_SIZE: usize = 128;
@@ -166,6 +168,7 @@ pub fn write_bytes(
     compute_buffer: Pubkey,
     authority: Pubkey,
     offset: u32,
+    finalized: bool,
     bytes: &[u8],
 ) -> Instruction {
     let accounts = vec![
@@ -176,6 +179,7 @@ pub fn write_bytes(
 
     let mut data = vec![ToPrimitive::to_u8(&Curve25519Instruction::WriteBytes).unwrap()];
     data.extend_from_slice(bytemuck::bytes_of(&offset));
+    data.push(if finalized { 0x00 } else { 0x01 });
     data.extend_from_slice(bytes);
     Instruction {
         program_id: crate::ID,

@@ -46,6 +46,7 @@ pub fn process_instruction(
                 |authority| InstructionHeader {
                     key: Key::InstructionBufferV1,
                     authority,
+                    finalized: false,
                 },
             )
         }
@@ -56,6 +57,7 @@ pub fn process_instruction(
                 |authority| InputHeader {
                     key: Key::InputBufferV1,
                     authority,
+                    finalized: false,
                 },
             )
         }
@@ -83,7 +85,8 @@ pub fn process_instruction(
             process_write_bytes(
                 accounts,
                 offset()?,
-                &input[5..],
+                input[5] == 0x00, // set to 0x00 for finalization
+                &input[6..],
             )
         }
         Curve25519Instruction::CrankCompute => {
@@ -143,6 +146,10 @@ fn process_dsl_instruction(
     };
     if instruction_header.key != Key::InstructionBufferV1 {
         msg!("Invalid instruction buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+    if !instruction_header.finalized {
+        msg!("Instruction buffer not finalized");
         return Err(ProgramError::InvalidArgument);
     }
 
@@ -332,6 +339,7 @@ fn process_close_buffer(
 fn process_write_bytes(
     accounts: &[AccountInfo],
     offset: u32,
+    finalized: bool,
     bytes: &[u8],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
@@ -347,22 +355,48 @@ fn process_write_bytes(
     let offset = offset as usize;
     let mut buffer_data = buffer_info.try_borrow_mut_data()?;
 
-    let mut buffer_ptr: &[u8] = buffer_data.borrow();
-
     match Key::from_u8(buffer_data[0]).ok_or(ProgramError::InvalidArgument)? {
         Key::InputBufferV1 => {
-            let header = InputHeader::deserialize(&mut buffer_ptr)?;
+            let mut header = {
+                let mut buffer_ptr: &[u8] = buffer_data.borrow();
+                InputHeader::deserialize(&mut buffer_ptr)?
+            };
             if header.authority != *authority_info.key {
                 msg!("Invalid input buffer authority");
                 return Err(ProgramError::InvalidArgument);
             }
+
+            if header.finalized {
+                msg!("Input buffer already finalized");
+                return Err(ProgramError::InvalidArgument);
+            }
+
+            header.finalized = finalized;
+
+            use std::borrow::BorrowMut;
+            let mut buffer_ptr: &mut [u8] = buffer_data.borrow_mut();
+            header.serialize(&mut buffer_ptr)?;
         }
         Key::InstructionBufferV1 => {
-            let header = InstructionHeader::deserialize(&mut buffer_ptr)?;
+            let mut header = {
+                let mut buffer_ptr: &[u8] = buffer_data.borrow();
+                InstructionHeader::deserialize(&mut buffer_ptr)?
+            };
             if header.authority != *authority_info.key {
                 msg!("Invalid instruction buffer authority");
                 return Err(ProgramError::InvalidArgument);
             }
+
+            if header.finalized {
+                msg!("Input buffer already finalized");
+                return Err(ProgramError::InvalidArgument);
+            }
+
+            header.finalized = finalized;
+
+            use std::borrow::BorrowMut;
+            let mut buffer_ptr: &mut [u8] = buffer_data.borrow_mut();
+            header.serialize(&mut buffer_ptr)?;
         }
         _ => {
             msg!("Invalid buffer type");
@@ -398,6 +432,10 @@ fn process_copy_input(
 
     if input_header.key != Key::InputBufferV1 {
         msg!("Invalid buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+    if !input_header.finalized {
+        msg!("Input buffer not finalized");
         return Err(ProgramError::InvalidArgument);
     }
 

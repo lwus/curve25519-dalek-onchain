@@ -117,16 +117,24 @@ async fn test_pow22501_p1() {
 
     // write the instructions
     let mut dsl_idx = 0;
-    while dsl_idx < dsl.len() {
+    let dsl_chunk = 800;
+    loop {
+        let end = (dsl_idx+dsl_chunk).min(dsl.len());
+        let done = end == dsl.len();
         instructions.push(
             instruction::write_bytes(
                 instruction_buffer.pubkey(),
                 payer.pubkey(),
                 (instruction::HEADER_SIZE + dsl_idx) as u32,
-                &dsl[dsl_idx..(dsl_idx+1000).min(dsl.len())],
+                done,
+                &dsl[dsl_idx..end],
             )
         );
-        dsl_idx += 1000;
+        if done {
+            break;
+        } else {
+            dsl_idx = end;
+        }
     }
 
     // write the points
@@ -139,6 +147,7 @@ async fn test_pow22501_p1() {
             input_buffer.pubkey(),
             payer.pubkey(),
             instruction::HEADER_SIZE as u32,
+            false,
             points_as_bytes.as_slice()
         ),
     );
@@ -153,6 +162,7 @@ async fn test_pow22501_p1() {
             input_buffer.pubkey(),
             payer.pubkey(),
             (instruction::HEADER_SIZE + scalars.len() * 32) as u32,
+            false,
             scalars_as_bytes.as_slice()
         ),
     );
@@ -164,6 +174,7 @@ async fn test_pow22501_p1() {
             input_buffer.pubkey(),
             payer.pubkey(),
             (instruction::HEADER_SIZE + scalars.len() * 32 * 2) as u32,
+            true,
             &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
         ),
     );
