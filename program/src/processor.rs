@@ -38,6 +38,13 @@ pub fn process_instruction(
         bytes_as_u32(&input[1..5])
     };
     match decode_instruction_type(input)? {
+        Curve25519Instruction::InitializeInstructionBuffer => {
+            msg!("InitializeInstructionBuffer");
+            process_initialize_buffer(
+                accounts,
+                InstructionHeader{ key: Key::InstructionBufferV1 },
+            )
+        }
         Curve25519Instruction::InitializeInputBuffer => {
             msg!("InitializeInputBuffer");
             process_initialize_buffer(
@@ -81,19 +88,40 @@ fn process_dsl_instruction(
     let input_buffer_info = next_account_info(account_info_iter)?;
     let compute_buffer_info = next_account_info(account_info_iter)?;
 
+    if instruction_buffer_info.owner != &crate::ID {
+        return Err(ProgramError::InvalidArgument);
+    }
+    if input_buffer_info.owner != &crate::ID {
+        return Err(ProgramError::InvalidArgument);
+    }
+    if compute_buffer_info.owner != &crate::ID {
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // deserialize headers and verify
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
     let mut compute_header = {
         let mut compute_buffer_ptr: &[u8] = *compute_buffer_data;
         ComputeHeader::deserialize(&mut compute_buffer_ptr)?
     };
-
     if compute_header.key != Key::ComputeBufferV1 {
-        msg!("Invalid buffer type");
+        msg!("Invalid compute buffer type");
         return Err(ProgramError::InvalidArgument);
     }
 
     let instruction_buffer_data = instruction_buffer_info.try_borrow_data()?;
-    let instruction_offset = INSTRUCTION_SIZE * compute_header.instruction_num as usize;
+    let instruction_header = {
+        let mut instruction_buffer_ptr: &[u8] = *instruction_buffer_data;
+        InstructionHeader::deserialize(&mut instruction_buffer_ptr)?
+    };
+    if instruction_header.key != Key::InstructionBufferV1 {
+        msg!("Invalid instruction buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+
+    // find instruction and increment counter
+    let instruction_offset = HEADER_SIZE + INSTRUCTION_SIZE * compute_header.instruction_num as usize;
     let mut instruction_data = &instruction_buffer_data[
         instruction_offset..instruction_offset+INSTRUCTION_SIZE
     ];
@@ -221,7 +249,7 @@ fn process_write_bytes(
     let mut input_buffer_ptr: &[u8] = input_buffer_data.borrow();
     let header = InputHeader::deserialize(&mut input_buffer_ptr)?;
 
-    if header.key != Key::InputBufferV1 {
+    if header.key != Key::InputBufferV1 && header.key != Key::InstructionBufferV1 {
         msg!("Invalid buffer type");
         return Err(ProgramError::InvalidArgument);
     }

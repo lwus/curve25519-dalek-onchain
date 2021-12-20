@@ -10,19 +10,21 @@ use {
 
 #[cfg(not(target_arch = "bpf"))]
 use {
-    num_traits::{ToPrimitive},
+    num_traits::ToPrimitive,
     solana_program::{
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
     },
+    std::convert::TryInto,
 };
 
 #[derive(Clone, Copy, Debug, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
 pub enum Curve25519Instruction {
-    WriteBytes,
+    InitializeInstructionBuffer,
     InitializeInputBuffer,
     InitializeComputeBuffer,
+    WriteBytes,
     CrankCompute,
 }
 
@@ -33,6 +35,7 @@ pub enum Key {
     Uninitialized,
     InputBufferV1,
     ComputeBufferV1,
+    InstructionBufferV1,
 }
 
 // ComputeHeader and InputHeader should be smaller than HEADER_SIZE
@@ -45,6 +48,11 @@ pub struct ComputeHeader {
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct InputHeader {
+    pub key: Key,
+}
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct InstructionHeader {
     pub key: Key,
 }
 
@@ -181,140 +189,32 @@ pub fn write_bytes(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn run_compute_routine(
+pub fn initialize_buffer(
+    buffer: Pubkey,
     instruction_type: Curve25519Instruction,
-    compute_buffer: Pubkey,
-    offset: u32,
 ) -> Instruction {
     let accounts = vec![
-        AccountMeta::new(compute_buffer, false),
+        AccountMeta::new(buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
-    encode_instruction(
+    Instruction {
+        program_id: crate::ID,
         accounts,
-        instruction_type,
-        &offset,
-    )
+        data: vec![ToPrimitive::to_u8(&instruction_type).unwrap()],
+    }
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn build_lookup_table(
-    compute_buffer: Pubkey,
-    // table_buffer: Pubkey,
-    point_offset: u32,
-    table_offset: u32,
-) -> Instruction {
-    let accounts = vec![
-        AccountMeta::new(compute_buffer, false),
-        // AccountMeta::new(compute_buffer, false),
-        AccountMeta::new_readonly(solana_program::system_program::id(), false),
-    ];
-
-    encode_instruction(
-        accounts,
-        Curve25519Instruction::BuildLookupTable,
-        &[point_offset, table_offset],
-    )
-}
-
-#[cfg(not(target_arch = "bpf"))]
-pub fn multiscalar_mul(
-    compute_buffer: Pubkey,
-    start: u8,
-    end: u8,
-    num_inputs: u8,
-    scalars_offset: u32,
-    tables_offset: u32,
-    result_offset: u32,
-) -> Instruction {
-    let accounts = vec![
-        AccountMeta::new(compute_buffer, false),
-        AccountMeta::new_readonly(solana_program::system_program::id(), false),
-    ];
-
-    assert!(usize::from(num_inputs) <= MAX_MULTISCALAR_POINTS);
-
-    encode_instruction(
-        accounts,
-        Curve25519Instruction::MultiscalarMul,
-        &MultiscalarMulData {
-            start: start,
-            end: end,
-            num_inputs: num_inputs,
-            scalars_offset: scalars_offset.into(),
-            tables_offset: tables_offset.into(),
-            result_offset: result_offset.into(),
-        },
-    )
-}
-
-#[cfg(not(target_arch = "bpf"))]
-pub fn prep_multiscalar_input(
-    compute_buffer: Pubkey,
-    bytes: &[u8],
-    input_num: u8,
-    state_offset: u32,  // should leave at least room for decompression (32 * 11)
-) -> Vec<Instruction> {
-    let table_offset: u32 =
-        state_offset                       // decompression state
-        + input_num as u32 * 32 * 4 * 8;   // LUT size 8, 4 field elements per
-    vec![
-        write_bytes(
-            compute_buffer,
-            0,
-            &bytes,
-        ),
-        run_compute_routine(
-            Curve25519Instruction::DecompressInit,
-            compute_buffer,
-            0,
-        ),
-        run_compute_routine(
-            Curve25519Instruction::InvSqrtInit,
-            compute_buffer,
-            32,
-        ),
-        run_compute_routine(
-            Curve25519Instruction::Pow22501P1,
-            compute_buffer,
-            64,
-        ),
-        run_compute_routine(
-            Curve25519Instruction::Pow22501P2,
-            compute_buffer,
-            96,
-        ),
-        run_compute_routine(
-            Curve25519Instruction::InvSqrtFini,
-            compute_buffer,
-            32,
-        ),
-        run_compute_routine(
-            Curve25519Instruction::DecompressFini,
-            compute_buffer,
-            0,
-        ),
-        build_lookup_table(
-            compute_buffer,
-            32 * 7,
-            table_offset,
-        ),
-    ]
-}
-
-
-#[cfg(not(target_arch = "bpf"))]
-pub fn transer_proof_instructions() {
+pub fn transer_proof_instructions(
+    proof_groups: Vec<usize>,
+) -> Vec<u8> {
     // input buffer is laid out as
     // [ ..header.., ..proof_inputs.., ..proof_scalars.. ]
 
     // some duplicates
-    let num_proof_inputs = 11;
+    let num_proof_inputs = proof_groups.iter().sum();
     let num_proof_scalars = num_proof_inputs;
-    let proof_groups = [3, 3, 5];
-
-    assert_eq!(proof_groups.iter().sum(), num_proof_inputs);
 
     // compute buffer is laid out as
     // [
@@ -338,33 +238,34 @@ pub fn transer_proof_instructions() {
     for input_num in 0..num_proof_inputs {
         let input_offset = HEADER_SIZE + input_num * 32;
         let table_offset = tables_offset + input_num * table_size;
+        let scratch_space = scratch_space.try_into().unwrap();
         instructions.extend_from_slice(&[
-            DSLInstruction::CopyInput {
-                input_offset,
+            DSLInstruction::CopyInput(CopyInputData{
+                input_offset: input_offset.try_into().unwrap(),
                 compute_offset: scratch_space,
-            },
-            DSLInstruction::DecompressInit {
+            }),
+            DSLInstruction::DecompressInit(RunDecompressData{
                 offset: scratch_space,
-            },
-            DSLInstruction::InvSqrtInit {
+            }),
+            DSLInstruction::InvSqrtInit(RunDecompressData{
                 offset: scratch_space + 32,
-            },
-            DSLInstruction::Pow22501P1 {
+            }),
+            DSLInstruction::Pow22501P1(RunDecompressData{
                 offset: scratch_space + 64,
-            },
-            DSLInstruction::Pow22501P2 {
+            }),
+            DSLInstruction::Pow22501P2(RunDecompressData{
                 offset: scratch_space + 96,
-            },
-            DSLInstruction::InvSqrtFini {
+            }),
+            DSLInstruction::InvSqrtFini(RunDecompressData{
                 offset: scratch_space + 32,
-            },
-            DSLInstruction::DecompressFini {
+            }),
+            DSLInstruction::DecompressFini(RunDecompressData{
                 offset: scratch_space,
-            },
-            DSLInstruction::BuildLookupTable {
+            }),
+            DSLInstruction::BuildLookupTable(BuildLookupTableData{
                 point_offset: scratch_space,
-                table_offset,
-            },
+                table_offset: table_offset.try_into().unwrap(),
+            }),
         ]);
     }
 
@@ -375,10 +276,10 @@ pub fn transer_proof_instructions() {
         let input_offset = input_scalars_offset + scalar_num * 32;
         let compute_offset = scalars_offset + scalar_num * 32;
         instructions.push(
-            DSLInstruction::CopyInput {
-                input_offset,
-                compute_offset,
-            },
+            DSLInstruction::CopyInput(CopyInputData{
+                input_offset: input_offset.try_into().unwrap(),
+                compute_offset: compute_offset.try_into().unwrap(),
+            }),
         );
     }
 
@@ -389,14 +290,14 @@ pub fn transer_proof_instructions() {
     for group_size in proof_groups.iter() {
         for iter in (0..64).rev() {
             instructions.push(
-                DSLInstruction::MultiscalarMul {
+                DSLInstruction::MultiscalarMul(MultiscalarMulData{
                     start: iter as u8,
                     end: iter + 1 as u8,
-                    num_inputs: group_size,
-                    scalars_offset,
-                    tables_offset,
-                    result_offset,
-                }
+                    num_inputs: (*group_size).try_into().unwrap(),
+                    scalars_offset: scalars_offset.try_into().unwrap(),
+                    tables_offset: tables_offset.try_into().unwrap(),
+                    result_offset: result_offset.try_into().unwrap(),
+                })
             );
         }
         scalars_offset += group_size * 32;
@@ -406,10 +307,11 @@ pub fn transer_proof_instructions() {
 
     let mut bytes = Vec::with_capacity(INSTRUCTION_SIZE * instructions.len());
     for ix in instructions.iter() {
-        let buf = [0; INSTRUCTION_SIZE ];
-        let ix_bytes = bytemuck::bytes_of(&ix);
-        buf[..ix_bytes.len()].copy_from_slice(ix_bytes);
-        bytes.extend_with_slice(buf);
+        let mut buf = [0; INSTRUCTION_SIZE];
+        let ix_bytes = ix.try_to_vec().unwrap();
+        // should fail if len > INSTRUCTION_SIZE...
+        buf[..ix_bytes.len()].copy_from_slice(ix_bytes.as_slice());
+        bytes.extend_from_slice(&buf);
     }
 
     bytes

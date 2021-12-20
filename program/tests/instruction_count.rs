@@ -28,6 +28,8 @@ async fn test_pow22501_p1() {
     let rent = rent.unwrap();
 
     let compute_buffer = Keypair::new();
+    let input_buffer = Keypair::new();
+    let instruction_buffer = Keypair::new();
 
     let element_bytes = [
         202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
@@ -61,89 +63,104 @@ async fn test_pow22501_p1() {
         neg_element_bytes,
     ];
 
-    let num_inputs = scalars.len() as u32;
-    let tables_start = 32 * 12;
-
-    let buffer_len = (tables_start + num_inputs * (128 * 8 + 32)) as usize;
-    let buffer_minimum_balance_for_rent_exemption = rent
-        .minimum_balance(buffer_len);
-
     assert_eq!(scalars.len(), points.len());
+
+    let dsl = instruction::transer_proof_instructions(vec![scalars.len()]);
+
+    let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
+    let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2; // inputs + scalars
+    let compute_buffer_len = instruction::HEADER_SIZE + 0;
 
     let mut instructions = vec![
         system_instruction::create_account(
             &payer.pubkey(),
-            &compute_buffer.pubkey(),
-            buffer_minimum_balance_for_rent_exemption,
-            buffer_len as u64,
+            &instruction_buffer.pubkey(),
+            rent.minimum_balance(instruction_buffer_len),
+            instruction_buffer_len as u64,
             &id(),
+        ),
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &input_buffer.pubkey(),
+            rent.minimum_balance(input_buffer_len),
+            input_buffer_len as u64,
+            &id(),
+        ),
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &compute_buffer.pubkey(),
+            rent.minimum_balance(compute_buffer_len),
+            compute_buffer_len as u64,
+            &id(),
+        ),
+        instruction::initialize_buffer(
+            instruction_buffer.pubkey(),
+            instruction::Curve25519Instruction::InitializeInstructionBuffer,
+        ),
+        instruction::initialize_buffer(
+            input_buffer.pubkey(),
+            instruction::Curve25519Instruction::InitializeInputBuffer,
         ),
     ];
 
-    // write the point lookup tables
-    for i in 0..num_inputs {
-        instructions.extend_from_slice(
-            instruction::prep_multiscalar_input(
-                compute_buffer.pubkey(),
-                &points[i as usize],
-                i as u8,
-                tables_start,
-            ).as_slice(),
+    // write the instructions
+    let mut dsl_idx = 0;
+    while dsl_idx < dsl.len() {
+        instructions.push(
+            instruction::write_bytes(
+                instruction_buffer.pubkey(),
+                (instruction::HEADER_SIZE + dsl_idx) as u32,
+                &dsl[dsl_idx..(dsl_idx+1000).min(dsl.len())],
+            )
         );
+        dsl_idx += 1000;
     }
+
+    // write the points
+    let mut points_as_bytes = vec![];
+    for i in 0..points.len(){
+        points_as_bytes.extend_from_slice(&points[i]);
+    }
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            instruction::HEADER_SIZE as u32,
+            points_as_bytes.as_slice()
+        ),
+    );
 
     // write the scalars
-    let tables_end = tables_start + num_inputs * 128 * 8;
     let mut scalars_as_bytes = vec![];
-    for i in 0..num_inputs {
-        scalars_as_bytes.extend_from_slice(&scalars[i as usize].bytes);
+    for i in 0..scalars.len(){
+        scalars_as_bytes.extend_from_slice(&scalars[i].bytes);
     }
     instructions.push(
         instruction::write_bytes(
-            compute_buffer.pubkey(),
-            tables_end,
-            scalars_as_bytes.as_slice(),
+            input_buffer.pubkey(),
+            (instruction::HEADER_SIZE + scalars.len() * 32) as u32,
+            scalars_as_bytes.as_slice()
         ),
     );
 
-    // write the result point initial state
-    use curve25519_dalek_onchain::traits::Identity;
-    instructions.push(
-        instruction::write_bytes(
-            compute_buffer.pubkey(),
-            0,
-            &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
-        ),
-    );
 
-    for i in (0..64).rev() {
-        instructions.push(
-            instruction::multiscalar_mul(
-                compute_buffer.pubkey(),
-                i, // start
-                i+1, // end
-                num_inputs as u8,
-                tables_end, // scalars_offset
-                tables_start, // tables_offset
-                0,  // result_offset
-            ),
-        );
-    }
 
     let mut transaction = Transaction::new_with_payer(
         instructions.as_slice(),
         Some(&payer.pubkey()),
     );
-    transaction.sign(&[&payer, &compute_buffer], recent_blockhash);
+    transaction.sign(&[&payer, &instruction_buffer, &input_buffer, &compute_buffer], recent_blockhash);
     banks_client.process_transaction(transaction).await.unwrap();
 
-    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
-    let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
-        &account.data[..128]
-    );
-
+    let account = banks_client.get_account(instruction_buffer.pubkey()).await.unwrap().unwrap();
     println!("Data {:x?}", &account.data[..128]);
 
-    use curve25519_dalek_onchain::traits::IsIdentity;
-    println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
+    // let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+    // let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
+    //     &account.data[..128]
+    // );
+
+    // println!("Data {:x?}", &account.data[..128]);
+
+    // use curve25519_dalek_onchain::traits::IsIdentity;
+    // println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
 }
