@@ -130,7 +130,12 @@ fn process_dsl_instruction(
     ];
 
     compute_header.instruction_num += 1;
-    compute_header.serialize(&mut *compute_buffer_data)?;
+    // TODO: directly doing serialize like
+    //   compute_header.serialize(&mut *compute_buffer_data)?;
+    // seems to do weird things...
+    let compute_header_bytes = compute_header.try_to_vec()?;
+    compute_buffer_data[..compute_header_bytes.len()].copy_from_slice(
+        compute_header_bytes.as_slice());
     drop(compute_buffer_data);
 
     match DSLInstruction::deserialize(&mut instruction_data)? {
