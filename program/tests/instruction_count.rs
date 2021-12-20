@@ -98,17 +98,20 @@ async fn test_pow22501_p1() {
         instruction::initialize_buffer(
             instruction_buffer.pubkey(),
             payer.pubkey(),
-            instruction::Curve25519Instruction::InitializeInstructionBuffer,
+            instruction::Key::InstructionBufferV1,
+            vec![],
         ),
         instruction::initialize_buffer(
             input_buffer.pubkey(),
             payer.pubkey(),
-            instruction::Curve25519Instruction::InitializeInputBuffer,
+            instruction::Key::InputBufferV1,
+            vec![],
         ),
         instruction::initialize_buffer(
             compute_buffer.pubkey(),
             payer.pubkey(),
-            instruction::Curve25519Instruction::InitializeComputeBuffer,
+            instruction::Key::ComputeBufferV1,
+            vec![instruction_buffer.pubkey(), input_buffer.pubkey()],
         ),
     ];
 
@@ -118,6 +121,7 @@ async fn test_pow22501_p1() {
         instructions.push(
             instruction::write_bytes(
                 instruction_buffer.pubkey(),
+                payer.pubkey(),
                 (instruction::HEADER_SIZE + dsl_idx) as u32,
                 &dsl[dsl_idx..(dsl_idx+1000).min(dsl.len())],
             )
@@ -133,6 +137,7 @@ async fn test_pow22501_p1() {
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
+            payer.pubkey(),
             instruction::HEADER_SIZE as u32,
             points_as_bytes.as_slice()
         ),
@@ -146,6 +151,7 @@ async fn test_pow22501_p1() {
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
+            payer.pubkey(),
             (instruction::HEADER_SIZE + scalars.len() * 32) as u32,
             scalars_as_bytes.as_slice()
         ),
@@ -156,6 +162,7 @@ async fn test_pow22501_p1() {
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
+            payer.pubkey(),
             (instruction::HEADER_SIZE + scalars.len() * 32 * 2) as u32,
             &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
         ),

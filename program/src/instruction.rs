@@ -39,13 +39,16 @@ pub enum Key {
     InstructionBufferV1,
 }
 
-// ComputeHeader and InputHeader should be smaller than HEADER_SIZE
+// All headers should be smaller than HEADER_SIZE
+// TODO: split up since ComputeHeader is the largest by far...
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ComputeHeader {
     pub key: Key,
     pub instruction_num: u32,
     pub authority: Pubkey,
+    pub instruction_buffer: Pubkey,
+    pub input_buffer: Pubkey,
 }
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
@@ -60,7 +63,7 @@ pub struct InstructionHeader {
     pub authority: Pubkey,
 }
 
-pub const HEADER_SIZE: usize = 64;
+pub const HEADER_SIZE: usize = 128;
 pub const INSTRUCTION_SIZE: usize = 16;
 
 
@@ -161,11 +164,13 @@ pub fn pod_from_bytes<T: Pod>(bytes: &[u8]) -> Option<&T> {
 #[cfg(not(target_arch = "bpf"))]
 pub fn write_bytes(
     compute_buffer: Pubkey,
+    authority: Pubkey,
     offset: u32,
     bytes: &[u8],
 ) -> Instruction {
     let accounts = vec![
         AccountMeta::new(compute_buffer, false),
+        AccountMeta::new_readonly(authority, true),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
@@ -183,7 +188,8 @@ pub fn write_bytes(
 pub fn initialize_buffer(
     buffer: Pubkey,
     authority: Pubkey,
-    instruction_type: Curve25519Instruction,
+    buffer_type: Key,
+    inputkeys: Vec<Pubkey>,
 ) -> Instruction {
     let accounts = vec![
         AccountMeta::new(buffer, false),
@@ -191,10 +197,36 @@ pub fn initialize_buffer(
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
+    let instruction_type = match buffer_type {
+        Key::InstructionBufferV1 => {
+            assert!(inputkeys.len() == 0);
+            Curve25519Instruction::InitializeInstructionBuffer
+        },
+        Key::InputBufferV1 => {
+            assert!(inputkeys.len() == 0);
+            Curve25519Instruction::InitializeInputBuffer
+        },
+        Key::ComputeBufferV1 => {
+            assert!(
+                inputkeys.len() == 2,
+                "InitializeComputeBuffer needs input_buffer and instruction_buffer as pubkeys",
+            );
+            Curve25519Instruction::InitializeComputeBuffer
+        },
+        _ => {
+            assert!(false, "Invalid buffer type");
+            unreachable!();
+        },
+    };
+
+    let mut data = vec![ToPrimitive::to_u8(&instruction_type).unwrap()];
+    for k in inputkeys {
+        data.extend_from_slice(&k.to_bytes());
+    }
     Instruction {
         program_id: crate::ID,
         accounts,
-        data: vec![ToPrimitive::to_u8(&instruction_type).unwrap()],
+        data,
     }
 }
 

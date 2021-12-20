@@ -129,16 +129,20 @@ fn process_demo(
     let compute_buffer_len = instruction::HEADER_SIZE + 10000;
 
     let buffers = [
-        (&instruction_buffer, instruction_buffer_len, "instruction", instruction::Curve25519Instruction::InitializeInstructionBuffer),
-        (&input_buffer, input_buffer_len, "input", instruction::Curve25519Instruction::InitializeInputBuffer),
-        (&compute_buffer, compute_buffer_len, "compute", instruction::Curve25519Instruction::InitializeComputeBuffer),
+        (&instruction_buffer, instruction_buffer_len, "instruction", instruction::Key::InstructionBufferV1),
+        (&input_buffer, input_buffer_len, "input", instruction::Key::InputBufferV1),
+        (&compute_buffer, compute_buffer_len, "compute", instruction::Key::ComputeBufferV1),
     ];
 
-    for (buffer, buffer_len, name, instruction_type) in buffers {
+    for (buffer, buffer_len, name, buffer_type) in buffers {
         let buffer_data = rpc_client.get_account_data(&buffer.pubkey());
         if let Ok(data) = buffer_data {
             assert!(data.len() >= buffer_len);
         } else {
+            let mut inputkeys = vec![];
+            if *buffer == compute_buffer {
+                inputkeys.extend_from_slice(&[instruction_buffer.pubkey(), input_buffer.pubkey()]);
+            }
             send(
                 rpc_client,
                 &format!("Creating {} buffer", name),
@@ -153,7 +157,8 @@ fn process_demo(
                     instruction::initialize_buffer(
                         buffer.pubkey(),
                         payer.pubkey(),
-                        instruction_type,
+                        buffer_type,
+                        inputkeys,
                     ),
                 ],
                 &[payer, buffer],
@@ -170,6 +175,7 @@ fn process_demo(
         instructions.push(
             instruction::write_bytes(
                 instruction_buffer.pubkey(),
+                payer.pubkey(),
                 (instruction::HEADER_SIZE + dsl_idx) as u32,
                 &dsl[dsl_idx..(dsl_idx+dsl_chunk).min(dsl.len())],
             )
@@ -192,6 +198,7 @@ fn process_demo(
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
+            payer.pubkey(),
             instruction::HEADER_SIZE as u32,
             points_as_bytes.as_slice()
         ),
@@ -213,6 +220,7 @@ fn process_demo(
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
+            payer.pubkey(),
             (instruction::HEADER_SIZE + scalars.len() * 32) as u32,
             scalars_as_bytes.as_slice()
         ),
@@ -223,6 +231,7 @@ fn process_demo(
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
+            payer.pubkey(),
             (instruction::HEADER_SIZE + scalars.len() * 32 * 2) as u32,
             &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
         ),

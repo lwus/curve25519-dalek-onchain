@@ -67,6 +67,8 @@ pub fn process_instruction(
                     key: Key::ComputeBufferV1,
                     instruction_num: 0,
                     authority,
+                    instruction_buffer: Pubkey::new(&input[1..33]),
+                    input_buffer: Pubkey::new(&input[33..65]),
                 },
             )
         }
@@ -123,6 +125,14 @@ fn process_dsl_instruction(
     };
     if compute_header.key != Key::ComputeBufferV1 {
         msg!("Invalid compute buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+    if compute_header.instruction_buffer != *instruction_buffer_info.key {
+        msg!("Mismatched instruction buffer {} vs {}", compute_header.instruction_buffer, *instruction_buffer_info.key);
+        return Err(ProgramError::InvalidArgument);
+    }
+    if compute_header.input_buffer != *input_buffer_info.key {
+        msg!("Mismatched input buffer");
         return Err(ProgramError::InvalidArgument);
     }
 
@@ -325,26 +335,47 @@ fn process_write_bytes(
     bytes: &[u8],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
-    let input_buffer_info = next_account_info(account_info_iter)?;
+    let buffer_info = next_account_info(account_info_iter)?;
+    let authority_info = next_account_info(account_info_iter)?;
     let _system_program_info = next_account_info(account_info_iter)?;
 
-    let offset = offset as usize;
-    let mut input_buffer_data = input_buffer_info.try_borrow_mut_data()?;
-
-    let mut input_buffer_ptr: &[u8] = input_buffer_data.borrow();
-    let header = InputHeader::deserialize(&mut input_buffer_ptr)?;
-
-    if header.key != Key::InputBufferV1 && header.key != Key::InstructionBufferV1 {
-        msg!("Invalid buffer type");
+    if !authority_info.is_signer {
+        msg!("Authority is not a signer");
         return Err(ProgramError::InvalidArgument);
     }
+
+    let offset = offset as usize;
+    let mut buffer_data = buffer_info.try_borrow_mut_data()?;
+
+    let mut buffer_ptr: &[u8] = buffer_data.borrow();
+
+    match Key::from_u8(buffer_data[0]).ok_or(ProgramError::InvalidArgument)? {
+        Key::InputBufferV1 => {
+            let header = InputHeader::deserialize(&mut buffer_ptr)?;
+            if header.authority != *authority_info.key {
+                msg!("Invalid input buffer authority");
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        Key::InstructionBufferV1 => {
+            let header = InstructionHeader::deserialize(&mut buffer_ptr)?;
+            if header.authority != *authority_info.key {
+                msg!("Invalid instruction buffer authority");
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        _ => {
+            msg!("Invalid buffer type");
+            return Err(ProgramError::InvalidArgument);
+        }
+    };
 
     if offset < HEADER_SIZE {
         msg!("Cannot write to header");
         return Err(ProgramError::InvalidArgument);
     }
 
-    input_buffer_data[offset..offset+bytes.len()].copy_from_slice(bytes);
+    buffer_data[offset..offset+bytes.len()].copy_from_slice(bytes);
 
     Ok(())
 }
