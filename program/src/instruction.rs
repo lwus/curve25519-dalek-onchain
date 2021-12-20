@@ -1,5 +1,6 @@
 use {
-    bytemuck::{Pod, Zeroable},
+    borsh::{BorshDeserialize, BorshSerialize},
+    bytemuck::{Pod},
     num_derive::{FromPrimitive, ToPrimitive},
     num_traits::{FromPrimitive},
     solana_program::{
@@ -16,44 +17,81 @@ use {
     },
 };
 
-
 #[derive(Clone, Copy, Debug, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
 pub enum Curve25519Instruction {
     WriteBytes,
+    InitializeInputBuffer,
+    InitializeComputeBuffer,
+    CrankCompute,
+}
 
-    InvSqrtInit,
-    Pow22501P1,
-    Pow22501P2,
-    InvSqrtFini,
+// TODO: move to state
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub enum Key {
+    Uninitialized,
+    InputBufferV1,
+    ComputeBufferV1,
+}
 
-    DecompressInit,
-    DecompressFini,
+// ComputeHeader and InputHeader should be smaller than HEADER_SIZE
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct ComputeHeader {
+    pub key: Key,
+    pub instruction_num: u32,
+}
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct InputHeader {
+    pub key: Key,
+}
 
-    BuildLookupTable,
-    MultiscalarMul,
+pub const HEADER_SIZE: usize = 32;
+pub const INSTRUCTION_SIZE: usize = 16;
+
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum DSLInstruction {
+    CopyInput(CopyInputData),
+
+    DecompressInit(RunDecompressData),
+    InvSqrtInit(RunDecompressData),
+    Pow22501P1(RunDecompressData),
+    Pow22501P2(RunDecompressData),
+    InvSqrtFini(RunDecompressData),
+    DecompressFini(RunDecompressData),
+
+    BuildLookupTable(BuildLookupTableData),
+    MultiscalarMul(MultiscalarMulData),
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
 pub const MAX_MULTISCALAR_POINTS: usize = 6;
 
-/// The standard `u32` can cause alignment issues when placed in a `Pod`, define a replacement that
-/// is usable in all `Pod`s
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(transparent)]
-pub struct PodU32([u8; 4]);
-impl From<u32> for PodU32 {
-    fn from(n: u32) -> Self {
-        Self(n.to_le_bytes())
-    }
-}
-impl From<PodU32> for u32 {
-    fn from(pod: PodU32) -> Self {
-        Self::from_le_bytes(pod.0)
-    }
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct CopyInputData { // 32 bytes at a time.. TODO: more flexible
+    pub input_offset: u32,
+    pub compute_offset: u32,
 }
 
-#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct RunDecompressData {
+    pub offset: u32,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct BuildLookupTableData {
+    pub point_offset: u32,
+    pub table_offset: u32,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct MultiscalarMulData {
     // reversed
@@ -61,17 +99,17 @@ pub struct MultiscalarMulData {
     pub end: u8,
 
     pub num_inputs: u8,
-    pub scalars_offset: PodU32,
+    pub scalars_offset: u32,
     // Offsets to LUTs computed from points. Expected to be a packed array
-    pub tables_offset: PodU32,
+    pub tables_offset: u32,
 
     // Result of previous computation and where this result will be stored
-    pub result_offset: PodU32,
+    pub result_offset: u32,
 }
 
-pub fn decode_instruction_type(
+pub fn decode_instruction_type<T: FromPrimitive>(
     input: &[u8]
-) -> Result<Curve25519Instruction, ProgramError> {
+) -> Result<T, ProgramError> {
     if input.is_empty() {
         Err(ProgramError::InvalidInstructionData)
     } else {
@@ -86,6 +124,17 @@ pub fn decode_instruction_data<T: Pod>(
         Err(ProgramError::InvalidInstructionData)
     } else {
         pod_from_bytes(&input[1..]).ok_or(ProgramError::InvalidArgument)
+    }
+}
+
+pub fn decode_dsl_instruction_data<T: Pod>(
+    input: &[u8],
+) -> Result<&T, ProgramError> {
+    if input.len() < 2 {
+        Err(ProgramError::InvalidInstructionData)
+    } else {
+        pod_from_bytes(&input[1..1+std::mem::size_of::<T>()])
+            .ok_or(ProgramError::InvalidArgument)
     }
 }
 
@@ -253,3 +302,116 @@ pub fn prep_multiscalar_input(
         ),
     ]
 }
+
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn transer_proof_instructions() {
+    // input buffer is laid out as
+    // [ ..header.., ..proof_inputs.., ..proof_scalars.. ]
+
+    // some duplicates
+    let num_proof_inputs = 11;
+    let num_proof_scalars = num_proof_inputs;
+    let proof_groups = [3, 3, 5];
+
+    assert_eq!(proof_groups.iter().sum(), num_proof_inputs);
+
+    // compute buffer is laid out as
+    // [
+    //   ..header..,
+    //   ..result_space..,
+    //   ..scratch_space..,
+    //   ..scalars..,
+    //   ..tables..,
+    // ]
+    let result_space_size = proof_groups.len() * 32 * 4;
+    let scratch_space = HEADER_SIZE + result_space_size;
+    let scratch_space_size = 32 * 7; // space needed for decompression
+
+    let scalars_offset = scratch_space + scratch_space_size;
+    let tables_offset  = scalars_offset + 32 * num_proof_scalars;
+    let table_size = 32 * 4 * 8;
+
+    let mut instructions = vec![];
+
+    // build the lookup tables
+    for input_num in 0..num_proof_inputs {
+        let input_offset = HEADER_SIZE + input_num * 32;
+        let table_offset = tables_offset + input_num * table_size;
+        instructions.extend_from_slice(&[
+            DSLInstruction::CopyInput {
+                input_offset,
+                compute_offset: scratch_space,
+            },
+            DSLInstruction::DecompressInit {
+                offset: scratch_space,
+            },
+            DSLInstruction::InvSqrtInit {
+                offset: scratch_space + 32,
+            },
+            DSLInstruction::Pow22501P1 {
+                offset: scratch_space + 64,
+            },
+            DSLInstruction::Pow22501P2 {
+                offset: scratch_space + 96,
+            },
+            DSLInstruction::InvSqrtFini {
+                offset: scratch_space + 32,
+            },
+            DSLInstruction::DecompressFini {
+                offset: scratch_space,
+            },
+            DSLInstruction::BuildLookupTable {
+                point_offset: scratch_space,
+                table_offset,
+            },
+        ]);
+    }
+
+    // copy the scalars
+    let input_scalars_offset =
+        HEADER_SIZE + num_proof_inputs * 32;
+    for scalar_num in 0..num_proof_scalars {
+        let input_offset = input_scalars_offset + scalar_num * 32;
+        let compute_offset = scalars_offset + scalar_num * 32;
+        instructions.push(
+            DSLInstruction::CopyInput {
+                input_offset,
+                compute_offset,
+            },
+        );
+    }
+
+    // compute the multiscalar multiplication for each group
+    let mut scalars_offset = scalars_offset;
+    let mut tables_offset = tables_offset;
+    let mut result_offset = HEADER_SIZE;
+    for group_size in proof_groups.iter() {
+        for iter in (0..64).rev() {
+            instructions.push(
+                DSLInstruction::MultiscalarMul {
+                    start: iter as u8,
+                    end: iter + 1 as u8,
+                    num_inputs: group_size,
+                    scalars_offset,
+                    tables_offset,
+                    result_offset,
+                }
+            );
+        }
+        scalars_offset += group_size * 32;
+        tables_offset += group_size * 32 * 4;
+        result_offset += 32 * 4;
+    }
+
+    let mut bytes = Vec::with_capacity(INSTRUCTION_SIZE * instructions.len());
+    for ix in instructions.iter() {
+        let buf = [0; INSTRUCTION_SIZE ];
+        let ix_bytes = bytemuck::bytes_of(&ix);
+        buf[..ix_bytes.len()].copy_from_slice(ix_bytes);
+        bytes.extend_with_slice(buf);
+    }
+
+    bytes
+}
+

@@ -691,6 +691,7 @@ dependencies = [
 name = "curve25519-dalek-onchain"
 version = "0.0.1"
 dependencies = [
+ "borsh",
  "bytemuck",
  "byteorder",
  "curve25519-dalek 3.2.0",

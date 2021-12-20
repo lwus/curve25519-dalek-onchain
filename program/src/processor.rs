@@ -17,7 +17,9 @@ use solana_program::{
     pubkey::Pubkey,
 };
 
+use borsh::{BorshDeserialize, BorshSerialize};
 use std::{
+    borrow::Borrow,
     convert::TryInto,
 };
 
@@ -36,12 +38,77 @@ pub fn process_instruction(
         bytes_as_u32(&input[1..5])
     };
     match decode_instruction_type(input)? {
+        Curve25519Instruction::InitializeInputBuffer => {
+            msg!("InitializeInputBuffer");
+            process_initialize_buffer(
+                accounts,
+                InputHeader{ key: Key::InputBufferV1 },
+            )
+        }
+        Curve25519Instruction::InitializeComputeBuffer => {
+            msg!("InitializeComputeBuffer ");
+            process_initialize_buffer(
+                accounts,
+                ComputeHeader{
+                    key: Key::ComputeBufferV1,
+                    instruction_num: 0,
+                },
+            )
+        }
         Curve25519Instruction::WriteBytes => {
             msg!("WriteBytes");
             process_write_bytes(
                 accounts,
                 offset()?,
                 &input[5..],
+            )
+        }
+        Curve25519Instruction::CrankCompute => {
+            msg!("CrankCompute");
+            process_dsl_instruction(
+                accounts,
+            )
+        }
+    }
+}
+
+fn process_dsl_instruction(
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let instruction_buffer_info = next_account_info(account_info_iter)?;
+    // kind of sucks that this always needs to be passed in...
+    let input_buffer_info = next_account_info(account_info_iter)?;
+    let compute_buffer_info = next_account_info(account_info_iter)?;
+
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+    let mut compute_header = {
+        let mut compute_buffer_ptr: &[u8] = *compute_buffer_data;
+        ComputeHeader::deserialize(&mut compute_buffer_ptr)?
+    };
+
+    if compute_header.key != Key::ComputeBufferV1 {
+        msg!("Invalid buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let instruction_buffer_data = instruction_buffer_info.try_borrow_data()?;
+    let instruction_offset = INSTRUCTION_SIZE * compute_header.instruction_num as usize;
+    let mut instruction_data = &instruction_buffer_data[
+        instruction_offset..instruction_offset+INSTRUCTION_SIZE
+    ];
+
+    compute_header.instruction_num += 1;
+    compute_header.serialize(&mut *compute_buffer_data)?;
+    drop(compute_buffer_data);
+
+    match DSLInstruction::deserialize(&mut instruction_data)? {
+        DSLInstruction::CopyInput(offsets) => {
+            msg!("CopyInput");
+            process_copy_input(
+                input_buffer_info,
+                compute_buffer_info,
+                &offsets,
             )
         }
 
@@ -54,69 +121,89 @@ pub fn process_instruction(
         //   decompress_output_start
         //  ]
         // reads 32 bytes and writes 32
-        Curve25519Instruction::InvSqrtInit => {
+        DSLInstruction::InvSqrtInit(RunDecompressData{ offset }) => {
             msg!("InvSqrtInit");
             process_invsqrt_init(
-                accounts,
-                offset()?,
+                compute_buffer_info,
+                offset,
             )
         }
         // reads 32 bytes and writes 96
-        Curve25519Instruction::Pow22501P1 => {
+        DSLInstruction::Pow22501P1(RunDecompressData{ offset })=> {
             msg!("Pow22501P1");
             process_pow22501_p1(
-                accounts,
-                offset()?,
+                compute_buffer_info,
+                offset,
             )
         }
         // reads 64 bytes, skips 32, and writes 32
-        Curve25519Instruction::Pow22501P2 => {
+        DSLInstruction::Pow22501P2(RunDecompressData{ offset }) => {
             msg!("Pow22501P2");
             process_pow22501_p2(
-                accounts,
-                offset()?,
+                compute_buffer_info,
+                offset,
             )
         }
         // reads 32 bytes, skips 96, reads 32, and writes 32
-        Curve25519Instruction::InvSqrtFini => {
+        DSLInstruction::InvSqrtFini(RunDecompressData{ offset }) => {
             msg!("InvSqrtFini");
             process_invsqrt_fini(
-                accounts,
-                offset()?,
+                compute_buffer_info,
+                offset,
             )
         }
 
-        Curve25519Instruction::DecompressInit => {
+        DSLInstruction::DecompressInit(RunDecompressData{ offset }) => {
             msg!("DecompressInit");
             process_decompress_init(
-                accounts,
-                offset()?,
+                compute_buffer_info,
+                offset,
             )
         }
-        Curve25519Instruction::DecompressFini => {
+        DSLInstruction::DecompressFini(RunDecompressData{ offset }) => {
             msg!("DecompressFini");
             process_decompress_fini(
-                accounts,
-                offset()?,
+                compute_buffer_info,
+                offset,
             )
         }
 
-        Curve25519Instruction::BuildLookupTable => {
+        DSLInstruction::BuildLookupTable(data) => {
             msg!("BuildLookupTable");
             process_build_lookup_table(
-                accounts,
-                offset()?,
-                bytes_as_u32(&input[5..9])?,
+                compute_buffer_info,
+                &data,
             )
         }
-        Curve25519Instruction::MultiscalarMul => {
+        DSLInstruction::MultiscalarMul(data) => {
             msg!("MultiscalarMul");
             process_multiscalar_mul(
-                accounts,
-                decode_instruction_data::<MultiscalarMulData>(input)?,
+                compute_buffer_info,
+                &data,
             )
         }
     }
+}
+
+fn process_initialize_buffer<T: BorshSerialize>(
+    accounts: &[AccountInfo],
+    header: T,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let buffer_info = next_account_info(account_info_iter)?;
+    let _system_program_info = next_account_info(account_info_iter)?;
+
+    let mut buffer_data = buffer_info.try_borrow_mut_data()?;
+
+    if buffer_data[0] != Key::Uninitialized as u8 {
+        msg!("Buffer already initialized");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // TODO: does this write correctly?
+    header.serialize(&mut *buffer_data)?;
+
+    Ok(())
 }
 
 fn process_write_bytes(
@@ -125,25 +212,71 @@ fn process_write_bytes(
     bytes: &[u8],
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
+    let input_buffer_info = next_account_info(account_info_iter)?;
     let _system_program_info = next_account_info(account_info_iter)?;
 
     let offset = offset as usize;
-    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+    let mut input_buffer_data = input_buffer_info.try_borrow_mut_data()?;
 
-    compute_buffer_data[offset..offset+bytes.len()].copy_from_slice(bytes);
+    let mut input_buffer_ptr: &[u8] = input_buffer_data.borrow();
+    let header = InputHeader::deserialize(&mut input_buffer_ptr)?;
+
+    if header.key != Key::InputBufferV1 {
+        msg!("Invalid buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    if offset < HEADER_SIZE {
+        msg!("Cannot write to header");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    input_buffer_data[offset..offset+bytes.len()].copy_from_slice(bytes);
+
+    Ok(())
+}
+
+fn process_copy_input(
+    input_buffer_info: &AccountInfo,
+    compute_buffer_info: &AccountInfo,
+    offsets: &CopyInputData,
+) -> ProgramResult {
+    let input_buffer_data = input_buffer_info.try_borrow_data()?;
+
+    let mut input_buffer_ptr: &[u8] = input_buffer_data.borrow();
+    let input_header = InputHeader::deserialize(&mut input_buffer_ptr)?;
+
+    if input_header.key != Key::InputBufferV1 {
+        msg!("Invalid buffer type");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let input_offset = offsets.input_offset as usize;
+    if input_offset < HEADER_SIZE {
+        msg!("Cannot copy from header");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let compute_offset = offsets.compute_offset as usize;
+    if compute_offset < HEADER_SIZE {
+        msg!("Cannot copy to header");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+    compute_buffer_data[
+        compute_offset..compute_offset+32
+    ].copy_from_slice(&input_buffer_data[
+        input_offset..input_offset+32
+    ]);
 
     Ok(())
 }
 
 fn process_invsqrt_init(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
@@ -166,13 +299,9 @@ fn process_invsqrt_init(
 }
 
 fn process_invsqrt_fini(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
@@ -211,13 +340,9 @@ fn process_invsqrt_fini(
 }
 
 fn process_pow22501_p1(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
@@ -241,13 +366,9 @@ fn process_pow22501_p1(
 }
 
 fn process_pow22501_p2(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
@@ -272,13 +393,9 @@ fn process_pow22501_p2(
 }
 
 fn process_decompress_init(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
@@ -295,13 +412,9 @@ fn process_decompress_init(
 }
 
 fn process_decompress_fini(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
@@ -326,18 +439,12 @@ fn process_decompress_fini(
 }
 
 fn process_build_lookup_table(
-    accounts: &[AccountInfo],
-    point_offset: u32,
-    table_offset: u32,
+    compute_buffer_info: &AccountInfo,
+    data: &BuildLookupTableData,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    // let table_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
 
-    let point_offset = point_offset as usize;
+    let point_offset = data.point_offset as usize;
     let point = EdwardsPoint::from_bytes(
         &compute_buffer_data[point_offset..point_offset+128]
     );
@@ -349,7 +456,7 @@ fn process_build_lookup_table(
 
     drop(compute_buffer_data);
     let mut table_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-    let mut table_offset = table_offset as usize;
+    let mut table_offset = data.table_offset as usize;
     for i in 0..table.0.len() {
         table_buffer_data[table_offset..table_offset+128].copy_from_slice(
             &table.0[i].to_bytes());
@@ -360,13 +467,9 @@ fn process_build_lookup_table(
 }
 
 fn process_multiscalar_mul(
-    accounts: &[AccountInfo],
+    compute_buffer_info: &AccountInfo,
     data: &MultiscalarMulData,
 ) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let compute_buffer_info = next_account_info(account_info_iter)?;
-    let _system_program_info = next_account_info(account_info_iter)?;
-
     let num_inputs = data.num_inputs as usize;
     if num_inputs > MAX_MULTISCALAR_POINTS {
         msg!("Too many points");
