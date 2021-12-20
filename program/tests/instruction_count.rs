@@ -69,7 +69,9 @@ async fn test_pow22501_p1() {
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2; // inputs + scalars
-    let compute_buffer_len = instruction::HEADER_SIZE + 0;
+
+    // pick a large number... at least > 8 * 128 * scalars.len()
+    let compute_buffer_len = instruction::HEADER_SIZE + 10000;
 
     let mut instructions = vec![
         system_instruction::create_account(
@@ -101,6 +103,10 @@ async fn test_pow22501_p1() {
             input_buffer.pubkey(),
             instruction::Curve25519Instruction::InitializeInputBuffer,
         ),
+        instruction::initialize_buffer(
+            compute_buffer.pubkey(),
+            instruction::Curve25519Instruction::InitializeComputeBuffer,
+        ),
     ];
 
     // write the instructions
@@ -131,7 +137,7 @@ async fn test_pow22501_p1() {
 
     // write the scalars
     let mut scalars_as_bytes = vec![];
-    for i in 0..scalars.len(){
+    for i in 0..scalars.len() {
         scalars_as_bytes.extend_from_slice(&scalars[i].bytes);
     }
     instructions.push(
@@ -142,8 +148,6 @@ async fn test_pow22501_p1() {
         ),
     );
 
-
-
     let mut transaction = Transaction::new_with_payer(
         instructions.as_slice(),
         Some(&payer.pubkey()),
@@ -151,16 +155,34 @@ async fn test_pow22501_p1() {
     transaction.sign(&[&payer, &instruction_buffer, &input_buffer, &compute_buffer], recent_blockhash);
     banks_client.process_transaction(transaction).await.unwrap();
 
-    let account = banks_client.get_account(instruction_buffer.pubkey()).await.unwrap().unwrap();
-    println!("Data {:x?}", &account.data[..128]);
 
-    // let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
-    // let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
-    //     &account.data[..128]
-    // );
+    instructions.clear();
+    // crank baby
+    for _i in 0..(dsl.len() / instruction::INSTRUCTION_SIZE) {
+        instructions.push(
+            instruction::crank_compute(
+                instruction_buffer.pubkey(),
+                input_buffer.pubkey(),
+                compute_buffer.pubkey(),
+            ),
+        );
+    }
 
-    // println!("Data {:x?}", &account.data[..128]);
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
 
-    // use curve25519_dalek_onchain::traits::IsIdentity;
-    // println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
+    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+    let mul_result_bytes = &account.data[32..128+32];
+    let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
+        mul_result_bytes
+    );
+
+    println!("Data {:x?}", mul_result_bytes);
+
+    use curve25519_dalek_onchain::traits::IsIdentity;
+    println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
 }

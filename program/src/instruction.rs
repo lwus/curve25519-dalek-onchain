@@ -153,20 +153,6 @@ pub fn pod_from_bytes<T: Pod>(bytes: &[u8]) -> Option<&T> {
 
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn encode_instruction<T: Pod>(
-    accounts: Vec<AccountMeta>,
-    instruction_type: Curve25519Instruction,
-    instruction_data: &T,
-) -> Instruction {
-    let mut data = vec![ToPrimitive::to_u8(&instruction_type).unwrap()];
-    data.extend_from_slice(bytemuck::bytes_of(instruction_data));
-    Instruction {
-        program_id: crate::ID,
-        accounts,
-        data,
-    }
-}
-
 #[cfg(not(target_arch = "bpf"))]
 pub fn write_bytes(
     compute_buffer: Pubkey,
@@ -202,6 +188,26 @@ pub fn initialize_buffer(
         program_id: crate::ID,
         accounts,
         data: vec![ToPrimitive::to_u8(&instruction_type).unwrap()],
+    }
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn crank_compute(
+    instruction_buffer: Pubkey,
+    input_buffer: Pubkey,
+    compute_buffer: Pubkey,
+) -> Instruction {
+    let accounts = vec![
+        AccountMeta::new_readonly(instruction_buffer, false),
+        AccountMeta::new_readonly(input_buffer, false),
+        AccountMeta::new(compute_buffer, false),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: vec![ToPrimitive::to_u8(&Curve25519Instruction::CrankCompute).unwrap()],
     }
 }
 

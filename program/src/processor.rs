@@ -88,13 +88,16 @@ fn process_dsl_instruction(
     let input_buffer_info = next_account_info(account_info_iter)?;
     let compute_buffer_info = next_account_info(account_info_iter)?;
 
-    if instruction_buffer_info.owner != &crate::ID {
+    if *instruction_buffer_info.owner != crate::ID {
+        msg!("Bad instruction buffer");
         return Err(ProgramError::InvalidArgument);
     }
-    if input_buffer_info.owner != &crate::ID {
+    if *input_buffer_info.owner != crate::ID {
+        msg!("Bad input buffer");
         return Err(ProgramError::InvalidArgument);
     }
-    if compute_buffer_info.owner != &crate::ID {
+    if *compute_buffer_info.owner != crate::ID {
+        msg!("Bad compute buffer");
         return Err(ProgramError::InvalidArgument);
     }
 
