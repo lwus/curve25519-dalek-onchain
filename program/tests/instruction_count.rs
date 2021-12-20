@@ -195,5 +195,5 @@ async fn test_pow22501_p1() {
     println!("Data {:x?}", mul_result_bytes);
 
     use curve25519_dalek_onchain::traits::IsIdentity;
-    println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
+    assert!(curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
 }

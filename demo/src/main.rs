@@ -26,6 +26,8 @@ struct Config {
     default_signer: Box<dyn Signer>,
     json_rpc_url: String,
     verbose: bool,
+    instruction_buffer: Option<String>,
+    input_buffer: Option<String>,
     compute_buffer: Option<String>,
 }
 
@@ -57,8 +59,22 @@ fn send(
 fn process_demo(
     rpc_client: &RpcClient,
     payer: &dyn Signer,
+    instruction_buffer: &Option<String>,
+    input_buffer: &Option<String>,
     compute_buffer: &Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    let input_buffer = if let Some(kp) = input_buffer {
+        Keypair::from_base58_string(kp)
+    } else {
+        Keypair::new()
+    };
+
+    let instruction_buffer = if let Some(kp) = instruction_buffer {
+        Keypair::from_base58_string(kp)
+    } else {
+        Keypair::new()
+    };
 
     let compute_buffer = if let Some(kp) = compute_buffer {
         Keypair::from_base58_string(kp)
@@ -66,6 +82,8 @@ fn process_demo(
         Keypair::new()
     };
 
+    println!("Instruction buffer keypair: {}", instruction_buffer.to_base58_string());
+    println!("Input buffer keypair: {}", input_buffer.to_base58_string());
     println!("Compute buffer keypair: {}", compute_buffer.to_base58_string());
 
     let element_bytes = [
@@ -100,52 +118,86 @@ fn process_demo(
         neg_element_bytes,
     ];
 
-    let num_inputs = scalars.len() as u32;
-    let tables_start = 32 * 12;
-
-    let buffer_len = (tables_start + num_inputs * (128 * 8 + 32)) as usize;
-    let buffer_minimum_balance_for_rent_exemption = rpc_client
-        .get_minimum_balance_for_rent_exemption(buffer_len)?;
-
     assert_eq!(scalars.len(), points.len());
 
-    let compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey());
-    if let Ok(data) = compute_buffer_data {
-        assert!(data.len() >= buffer_len);
-    } else {
-        send(
-            rpc_client,
-            &format!("Creating compute buffer"),
-            &[
-                system_instruction::create_account(
-                    &payer.pubkey(),
-                    &compute_buffer.pubkey(),
-                    buffer_minimum_balance_for_rent_exemption,
-                    buffer_len as u64,
-                    &id(),
-                ),
-            ],
-            &[payer, &compute_buffer],
-        )?;
+    let dsl = instruction::transer_proof_instructions(vec![scalars.len()]);
+
+    let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
+    let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2 + 128;
+
+    // pick a large number... at least > 8 * 128 * scalars.len()
+    let compute_buffer_len = instruction::HEADER_SIZE + 10000;
+
+    let buffers = [
+        (&instruction_buffer, instruction_buffer_len, "instruction", instruction::Curve25519Instruction::InitializeInstructionBuffer),
+        (&input_buffer, input_buffer_len, "input", instruction::Curve25519Instruction::InitializeInputBuffer),
+        (&compute_buffer, compute_buffer_len, "compute", instruction::Curve25519Instruction::InitializeComputeBuffer),
+    ];
+
+    for (buffer, buffer_len, name, instruction_type) in buffers {
+        let buffer_data = rpc_client.get_account_data(&buffer.pubkey());
+        if let Ok(data) = buffer_data {
+            assert!(data.len() >= buffer_len);
+        } else {
+            send(
+                rpc_client,
+                &format!("Creating {} buffer", name),
+                &[
+                    system_instruction::create_account(
+                        &payer.pubkey(),
+                        &buffer.pubkey(),
+                        rpc_client.get_minimum_balance_for_rent_exemption(buffer_len)?,
+                        buffer_len as u64,
+                        &id(),
+                    ),
+                    instruction::initialize_buffer(
+                        buffer.pubkey(),
+                        instruction_type,
+                    ),
+                ],
+                &[payer, buffer],
+            )?;
+        }
     }
 
     let mut instructions = vec![];
 
-    // write the point lookup tables
-    for i in 0..num_inputs {
-        instructions.extend_from_slice(
-            instruction::prep_multiscalar_input(
-                compute_buffer.pubkey(),
-                &points[i as usize],
-                i as u8,
-                tables_start,
-            ).as_slice(),
+    // write the instructions
+    let mut dsl_idx = 0;
+    let dsl_chunk = 800;
+    while dsl_idx < dsl.len() {
+        instructions.push(
+            instruction::write_bytes(
+                instruction_buffer.pubkey(),
+                (instruction::HEADER_SIZE + dsl_idx) as u32,
+                &dsl[dsl_idx..(dsl_idx+dsl_chunk).min(dsl.len())],
+            )
         );
+        send(
+            rpc_client,
+            &format!("Writing instructions"),
+            instructions.as_slice(),
+            &[payer],
+        )?;
+        instructions.clear();
+        dsl_idx += dsl_chunk;
     }
 
+    // write the points
+    let mut points_as_bytes = vec![];
+    for i in 0..points.len(){
+        points_as_bytes.extend_from_slice(&points[i]);
+    }
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            instruction::HEADER_SIZE as u32,
+            points_as_bytes.as_slice()
+        ),
+    );
     send(
         rpc_client,
-        &format!("Prepping mul input points"),
+        &format!("Writing mul points"),
         instructions.as_slice(),
         &[payer],
     )?;
@@ -153,66 +205,87 @@ fn process_demo(
 
 
     // write the scalars
-    let tables_end = tables_start + num_inputs * 128 * 8;
     let mut scalars_as_bytes = vec![];
-    for i in 0..num_inputs {
-        scalars_as_bytes.extend_from_slice(&scalars[i as usize].bytes);
+    for i in 0..scalars.len() {
+        scalars_as_bytes.extend_from_slice(&scalars[i].bytes);
     }
     instructions.push(
         instruction::write_bytes(
-            compute_buffer.pubkey(),
-            tables_end,
-            scalars_as_bytes.as_slice(),
+            input_buffer.pubkey(),
+            (instruction::HEADER_SIZE + scalars.len() * 32) as u32,
+            scalars_as_bytes.as_slice()
         ),
     );
 
-    // write the result point initial state
+    // write identity for results
     use curve25519_dalek_onchain::traits::Identity;
     instructions.push(
         instruction::write_bytes(
-            compute_buffer.pubkey(),
-            0,
+            input_buffer.pubkey(),
+            (instruction::HEADER_SIZE + scalars.len() * 32 * 2) as u32,
             &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
         ),
     );
 
     send(
         rpc_client,
-        &format!("Prepping mul scalars"),
+        &format!("Writing mul scalars and ident"),
         instructions.as_slice(),
         &[payer],
     )?;
+    instructions.clear();
 
 
     let instructions_per_tx = 32;
-    let transactions = 64 / instructions_per_tx;
-    for i in (0..transactions).rev() {
+    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
+    for _i in 0..num_cranks {
+        instructions.push(
+            instruction::crank_compute(
+                instruction_buffer.pubkey(),
+                input_buffer.pubkey(),
+                compute_buffer.pubkey(),
+            ),
+        );
+    }
+    let mut current = 0;
+    while current < num_cranks {
         instructions.clear();
-        for j in (0..instructions_per_tx).rev() {
-            let iter = i * instructions_per_tx + j;
+        let iter_start = current;
+        for j in 0..instructions_per_tx {
+            if current >= num_cranks {
+                break;
+            }
             instructions.push(
-                instruction::multiscalar_mul(
+                instruction::crank_compute(
+                    instruction_buffer.pubkey(),
+                    input_buffer.pubkey(),
                     compute_buffer.pubkey(),
-                    iter, // start
-                    iter+1, // end
-                    num_inputs as u8,
-                    tables_end, // scalars_offset
-                    tables_start, // tables_offset
-                    0,  // result_offset
                 ),
             );
+            current += 1;
         }
         send(
             rpc_client,
             &format!(
                 "Iterations {}..{}",
-                i * instructions_per_tx,
-                (i + 1) * instructions_per_tx - 1
+                iter_start,
+                current,
             ),
             instructions.as_slice(),
             &[payer],
         )?;
     }
+
+    let compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey())?;
+    let mul_result_bytes = &compute_buffer_data[32..128+32];
+    let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
+        mul_result_bytes
+    );
+
+    println!("Data {:x?}", mul_result_bytes);
+
+    use curve25519_dalek_onchain::traits::IsIdentity;
+    assert!(curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
 
     Ok(())
 }
@@ -264,6 +337,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("JSON RPC URL for the cluster [default: value from configuration file]"),
         )
         .arg(
+            Arg::with_name("instruction_buffer")
+                .long("instruction_buffer")
+                .value_name("INSTRUCTION_BUFFER")
+                .takes_value(true)
+                .global(true)
+                .help("Instruction buffer keypair to use (or create)"),
+        )
+        .arg(
+            Arg::with_name("input_buffer")
+                .long("input_buffer")
+                .value_name("INPUT_BUFFER")
+                .takes_value(true)
+                .global(true)
+                .help("Input buffer keypair to use (or create)"),
+        )
+        .arg(
             Arg::with_name("compute_buffer")
                 .long("compute_buffer")
                 .value_name("COMPUTE_BUFFER")
@@ -305,6 +394,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }),
             verbose: matches.is_present("verbose"),
             commitment_config: CommitmentConfig::confirmed(),
+            instruction_buffer: matches.value_of("instruction_buffer").map(|s| s.into()),
+            input_buffer: matches.value_of("input_buffer").map(|s| s.into()),
             compute_buffer: matches.value_of("compute_buffer").map(|s| s.into()),
         }
     };
@@ -319,6 +410,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     process_demo(
         &rpc_client,
         config.default_signer.as_ref(),
+        &config.instruction_buffer,
+        &config.input_buffer,
         &config.compute_buffer,
     ).unwrap_or_else(|err| {
         eprintln!("error: {}", err);
