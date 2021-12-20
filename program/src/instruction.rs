@@ -13,9 +13,7 @@ use {
     solana_program::{
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
-        sysvar,
     },
-    std::convert::TryInto,
 };
 
 
@@ -118,7 +116,7 @@ pub fn write_bytes(
     offset: u32,
     bytes: &[u8],
 ) -> Instruction {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new(compute_buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
@@ -139,7 +137,7 @@ pub fn run_compute_routine(
     compute_buffer: Pubkey,
     offset: u32,
 ) -> Instruction {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new(compute_buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
@@ -158,7 +156,7 @@ pub fn build_lookup_table(
     point_offset: u32,
     table_offset: u32,
 ) -> Instruction {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new(compute_buffer, false),
         // AccountMeta::new(compute_buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
@@ -181,7 +179,7 @@ pub fn multiscalar_mul(
     tables_offset: u32,
     result_offset: u32,
 ) -> Instruction {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new(compute_buffer, false),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];

@@ -4,25 +4,20 @@ use {
         input_validators::{is_url_or_moniker, is_valid_signer, normalize_to_url_if_moniker},
         keypair::DefaultSigner,
     },
-    solana_client::{client_error, rpc_client::RpcClient},
+    solana_client::{rpc_client::RpcClient},
     solana_remote_wallet::remote_wallet::RemoteWalletManager,
     solana_sdk::{
         commitment_config::CommitmentConfig,
         instruction::Instruction,
         message::Message,
-        program_error::ProgramError,
-        program_pack::Pack,
-        pubkey::Pubkey,
         signature::{Keypair, Signer},
         system_instruction,
         transaction::Transaction,
     },
-    std::{convert::TryInto, process::exit, sync::Arc},
+    std::{process::exit, sync::Arc},
     curve25519_dalek_onchain::{
         id,
         instruction,
-        processor::process_instruction,
-        field::FieldElement,
     },
 };
 
@@ -114,7 +109,7 @@ fn process_demo(
 
     assert_eq!(scalars.len(), points.len());
 
-    let mut compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey());
+    let compute_buffer_data = rpc_client.get_account_data(&compute_buffer.pubkey());
     if let Ok(data) = compute_buffer_data {
         assert!(data.len() >= buffer_len);
     } else {

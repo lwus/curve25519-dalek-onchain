@@ -8,19 +8,17 @@ use {
         signature::Signer,
         system_instruction,
         transaction::Transaction,
-        instruction::AccountMeta,
     },
     curve25519_dalek_onchain::{
         id,
         instruction,
         processor::process_instruction,
-        field::FieldElement,
     },
 };
 
 #[tokio::test]
 async fn test_pow22501_p1() {
-    let mut pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
+    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
 
     // pc.set_bpf_compute_max_units(350_000);
 
@@ -140,10 +138,12 @@ async fn test_pow22501_p1() {
     banks_client.process_transaction(transaction).await.unwrap();
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
-    let Q = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
+    let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
         &account.data[..128]
     );
 
+    println!("Data {:x?}", &account.data[..128]);
+
     use curve25519_dalek_onchain::traits::IsIdentity;
-    println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(Q).is_identity());
+    println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
 }
