@@ -134,5 +134,10 @@ async fn test_pow22501_p1() {
     banks_client.process_transaction(transaction).await.unwrap();
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
-    println!("{} {:?}", account.data.len(), &account.data[..128]);
+    let Q = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
+        &account.data[..128]
+    );
+
+    use curve25519_dalek_onchain::traits::IsIdentity;
+    println!("Result {:?}", curve25519_dalek_onchain::ristretto::RistrettoPoint(Q).is_identity());
 }

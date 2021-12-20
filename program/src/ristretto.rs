@@ -163,7 +163,7 @@ impl Default for CompressedRistretto {
 /// `EdwardsPoint`s.
 ///
 #[derive(Copy, Clone)]
-pub struct RistrettoPoint(pub(crate) EdwardsPoint);
+pub struct RistrettoPoint(pub EdwardsPoint);
 
 // ------------------------------------------------------------------------
 // Multiscalar Multiplication impls
@@ -188,3 +188,27 @@ impl MultiscalarMul for RistrettoPoint {
         )
     }
 }
+
+impl ConstantTimeEq for RistrettoPoint {
+    /// Test equality between two `RistrettoPoint`s.
+    ///
+    /// # Returns
+    ///
+    /// * `Choice(1)` if the two `RistrettoPoint`s are equal;
+    /// * `Choice(0)` otherwise.
+    fn ct_eq(&self, other: &RistrettoPoint) -> Choice {
+        let X1Y2 = &self.0.X * &other.0.Y;
+        let Y1X2 = &self.0.Y * &other.0.X;
+        let X1X2 = &self.0.X * &other.0.X;
+        let Y1Y2 = &self.0.Y * &other.0.Y;
+
+        X1Y2.ct_eq(&Y1X2) | X1X2.ct_eq(&Y1Y2)
+    }
+}
+
+impl Identity for RistrettoPoint {
+    fn identity() -> RistrettoPoint {
+        RistrettoPoint(EdwardsPoint::identity())
+    }
+}
+
