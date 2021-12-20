@@ -277,6 +277,12 @@ fn process_copy_input(
     let mut input_buffer_ptr: &[u8] = input_buffer_data.borrow();
     let input_header = InputHeader::deserialize(&mut input_buffer_ptr)?;
 
+    let copy_bytes = offsets.bytes as usize;
+    if copy_bytes > 128 {
+        msg!("Copy slice size too large");
+        return Err(ProgramError::InvalidArgument);
+    }
+
     if input_header.key != Key::InputBufferV1 {
         msg!("Invalid buffer type");
         return Err(ProgramError::InvalidArgument);
@@ -296,9 +302,9 @@ fn process_copy_input(
 
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
     compute_buffer_data[
-        compute_offset..compute_offset+32
+        compute_offset..compute_offset+copy_bytes
     ].copy_from_slice(&input_buffer_data[
-        input_offset..input_offset+32
+        input_offset..input_offset+copy_bytes
     ]);
 
     Ok(())
@@ -463,6 +469,7 @@ fn process_decompress_fini(
 
     let res = point.decompress_fini(&element).ok_or(ProgramError::InvalidArgument)?;
 
+    let offset = offset + 32;
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.0.to_bytes());
 
@@ -480,7 +487,7 @@ fn process_build_lookup_table(
         &compute_buffer_data[point_offset..point_offset+128]
     );
 
-    msg!("Read point {:?}", point);
+    msg!("Read point {} {:?}", point_offset, point);
 
     let table = LookupTable::<ProjectiveNielsPoint>::from(&point);
 

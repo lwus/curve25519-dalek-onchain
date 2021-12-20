@@ -399,3 +399,10 @@ impl Debug for EdwardsPoint {
                &self.X, &self.Y, &self.Z, &self.T)
     }
 }
+
+impl Debug for ProjectiveNielsPoint {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+        write!(f, "ProjectiveNielsPoint{{\n\tY_plus_X: {:?},\n\tY_minus_X: {:?},\n\tZ: {:?},\n\tT2d: {:?}\n}}",
+               &self.Y_plus_X, &self.Y_minus_X, &self.Z, &self.T2d)
+    }
+}

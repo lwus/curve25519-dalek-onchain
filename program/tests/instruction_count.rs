@@ -55,12 +55,12 @@ async fn test_pow22501_p1() {
     ];
 
     let points = vec![
-        element_bytes,
         neg_element_bytes,
         element_bytes,
         neg_element_bytes,
         element_bytes,
         neg_element_bytes,
+        element_bytes,
     ];
 
     assert_eq!(scalars.len(), points.len());
@@ -68,7 +68,7 @@ async fn test_pow22501_p1() {
     let dsl = instruction::transer_proof_instructions(vec![scalars.len()]);
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
-    let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2; // inputs + scalars
+    let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2 + 128;
 
     // pick a large number... at least > 8 * 128 * scalars.len()
     let compute_buffer_len = instruction::HEADER_SIZE + 10000;
@@ -148,6 +148,16 @@ async fn test_pow22501_p1() {
         ),
     );
 
+    // write identity for results
+     use curve25519_dalek_onchain::traits::Identity;
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            (instruction::HEADER_SIZE + scalars.len() * 32 * 2) as u32,
+            &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
+        ),
+    );
+
     let mut transaction = Transaction::new_with_payer(
         instructions.as_slice(),
         Some(&payer.pubkey()),
@@ -158,7 +168,8 @@ async fn test_pow22501_p1() {
 
     instructions.clear();
     // crank baby
-    for _i in 0..(dsl.len() / instruction::INSTRUCTION_SIZE) {
+    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
+    for _i in 0..num_cranks {
         instructions.push(
             instruction::crank_compute(
                 instruction_buffer.pubkey(),

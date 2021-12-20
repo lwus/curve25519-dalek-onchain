@@ -84,6 +84,7 @@ pub const MAX_MULTISCALAR_POINTS: usize = 6;
 pub struct CopyInputData { // 32 bytes at a time.. TODO: more flexible
     pub input_offset: u32,
     pub compute_offset: u32,
+    pub bytes: u32,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
@@ -232,7 +233,8 @@ pub fn transer_proof_instructions(
     // ]
     let result_space_size = proof_groups.len() * 32 * 4;
     let scratch_space = HEADER_SIZE + result_space_size;
-    let scratch_space_size = 32 * 7; // space needed for decompression
+    let scratch_space_size = 32 * 12; // space needed for decompression
+    let decompress_res_offset = 32 * 8; // where decompressed result is written
 
     let scalars_offset = scratch_space + scratch_space_size;
     let tables_offset  = scalars_offset + 32 * num_proof_scalars;
@@ -249,6 +251,7 @@ pub fn transer_proof_instructions(
             DSLInstruction::CopyInput(CopyInputData{
                 input_offset: input_offset.try_into().unwrap(),
                 compute_offset: scratch_space,
+                bytes: 32,
             }),
             DSLInstruction::DecompressInit(RunDecompressData{
                 offset: scratch_space,
@@ -269,7 +272,7 @@ pub fn transer_proof_instructions(
                 offset: scratch_space,
             }),
             DSLInstruction::BuildLookupTable(BuildLookupTableData{
-                point_offset: scratch_space,
+                point_offset: scratch_space + decompress_res_offset,
                 table_offset: table_offset.try_into().unwrap(),
             }),
         ]);
@@ -285,8 +288,24 @@ pub fn transer_proof_instructions(
             DSLInstruction::CopyInput(CopyInputData{
                 input_offset: input_offset.try_into().unwrap(),
                 compute_offset: compute_offset.try_into().unwrap(),
+                bytes: 32,
             }),
         );
+    }
+
+    // copy the identity inputs
+    let mut result_offset = HEADER_SIZE;
+    let input_identity_offset =
+        input_scalars_offset + num_proof_scalars * 32;
+    for _group_size in proof_groups.iter() {
+        instructions.push(
+            DSLInstruction::CopyInput(CopyInputData{
+                input_offset: input_identity_offset.try_into().unwrap(),
+                compute_offset: result_offset.try_into().unwrap(),
+                bytes: 32 * 4,
+            }),
+        );
+        result_offset += 32 * 4;
     }
 
     // compute the multiscalar multiplication for each group
