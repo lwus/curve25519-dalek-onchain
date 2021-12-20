@@ -102,59 +102,75 @@ fn process_demo(
         76  , 183 , 142 , 167 , 62  , 36  , 241 , 1   ,
     ];
 
+    let neg_element_bytes = [
+        56  , 121 , 86  , 54  , 1   , 207 , 49  , 169 ,
+        17  , 26  , 157 , 55  , 224 , 194 , 217 , 15  ,
+        52  , 240 , 214 , 108 , 251 , 96  , 252 , 129 ,
+        242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
+    ];
+
+    let mut instructions = vec![];
+
+    instructions.extend_from_slice(
+        instruction::prep_multiscalar_input(
+            compute_buffer.pubkey(),
+            &element_bytes,
+            0,
+        ).as_slice(),
+    );
+
+    instructions.extend_from_slice(
+        instruction::prep_multiscalar_input(
+            compute_buffer.pubkey(),
+            &neg_element_bytes,
+            1,
+        ).as_slice(),
+    );
+
+    use curve25519_dalek_onchain::traits::Identity;
+    instructions.push(
+        instruction::write_bytes(
+            compute_buffer.pubkey(),
+            0,
+            &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
+        ),
+    );
+
     send(
         rpc_client,
-        &format!("Computing x^(2^250-1)"),
-        &[
-            instruction::write_bytes(
-                compute_buffer.pubkey(),
-                0,
-                &FieldElement::one().to_bytes()
-            ),
-            instruction::write_bytes(
-                compute_buffer.pubkey(),
-                0,
-                &element_bytes,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::DecompressInit,
-                compute_buffer.pubkey(),
-                0,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::InvSqrtInit,
-                compute_buffer.pubkey(),
-                32,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::Pow22501P1,
-                compute_buffer.pubkey(),
-                64,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::Pow22501P2,
-                compute_buffer.pubkey(),
-                96,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::InvSqrtFini,
-                compute_buffer.pubkey(),
-                32,
-            ),
-            instruction::run_compute_routine(
-                instruction::Curve25519Instruction::DecompressFini,
-                compute_buffer.pubkey(),
-                0,
-            ),
-            instruction::build_lookup_table(
-                compute_buffer.pubkey(),
-                // compute_buffer.pubkey(),
-                32 * 8,
-                32 * 12,
-            ),
-        ],
+        &format!("Prepping mul inputs"),
+        instructions.as_slice(),
         &[payer],
     )?;
+
+    for i in (0..8).rev() {
+        instructions.clear();
+        for j in (0..8).rev() {
+            let iter = i * 8 + j;
+            instructions.push(
+                instruction::multiscalar_mul(
+                    compute_buffer.pubkey(),
+                    0,  // point offset
+                    vec![ // scalars
+                        curve25519_dalek_onchain::scalar::Scalar::one(),
+                        curve25519_dalek_onchain::scalar::Scalar::one(),
+                    ],
+                    vec![ // table offsets
+                        32 * 12 + 128 * 8 * 0,
+                        32 * 12 + 128 * 8 * 1,
+                    ],
+                    iter, // start
+                    iter+1, // end
+                ),
+            );
+        }
+        send(
+            rpc_client,
+            &format!("Iterations {}..{}", i * 8, i * 8 + 7),
+            instructions.as_slice(),
+            &[payer],
+        )?;
+    }
 
     Ok(())
 }

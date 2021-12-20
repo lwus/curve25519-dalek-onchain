@@ -38,7 +38,7 @@ pub enum Curve25519Instruction {
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
-pub const MAX_MULTISCALAR_POINTS: usize = 6;
+pub const MAX_MULTISCALAR_POINTS: usize = 2;
 
 /// The standard `u32` can cause alignment issues when placed in a `Pod`, define a replacement that
 /// is usable in all `Pod`s
