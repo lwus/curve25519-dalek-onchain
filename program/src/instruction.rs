@@ -426,7 +426,7 @@ pub fn transer_proof_instructions(
             );
         }
         scalars_offset += group_size * 32;
-        tables_offset += group_size * 32 * 4;
+        tables_offset += group_size * 32 * 4 * 8;
         result_offset += 32 * 4;
     }
 

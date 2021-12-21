@@ -47,26 +47,23 @@ async fn test_pow22501_p1() {
 
     use curve25519_dalek_onchain::scalar::Scalar;
     let scalars = vec![
+        -Scalar::one(),
         Scalar::one(),
         Scalar::one(),
-        Scalar::one(),
-        Scalar::one(),
-        Scalar::one(),
-        Scalar::one(),
+        -Scalar::one(),
     ];
 
     let points = vec![
-        neg_element_bytes,
         element_bytes,
-        neg_element_bytes,
         element_bytes,
-        neg_element_bytes,
+        element_bytes,
         element_bytes,
     ];
 
     assert_eq!(scalars.len(), points.len());
 
-    let dsl = instruction::transer_proof_instructions(vec![scalars.len()]);
+    let proof_groups = vec![2, 2];
+    let dsl = instruction::transer_proof_instructions(proof_groups.clone());
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2 + 128;
@@ -176,17 +173,20 @@ async fn test_pow22501_p1() {
     banks_client.process_transaction(transaction).await.unwrap();
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
-    let mul_result_bytes = &account.data[instruction::HEADER_SIZE..128+instruction::HEADER_SIZE];
-    let mul_result = curve25519_dalek_onchain::edwards::EdwardsPoint::from_bytes(
-        mul_result_bytes
-    );
 
-    println!("Data {:x?}", mul_result_bytes);
+    let mut buffer_idx = instruction::HEADER_SIZE;
+    for _i in 0..proof_groups.len() {
+        use curve25519_dalek::traits::IsIdentity;
+        let mul_result_bytes = &account.data[buffer_idx..128+buffer_idx];
+        let mul_result = curve25519_dalek::edwards::EdwardsPoint::from_bytes(
+            mul_result_bytes
+        );
 
-    use curve25519_dalek_onchain::traits::IsIdentity;
-    assert!(curve25519_dalek_onchain::ristretto::RistrettoPoint(mul_result).is_identity());
+        println!("Data {:x?}", mul_result_bytes);
 
-
+        assert!(curve25519_dalek::ristretto::RistrettoPoint(mul_result).is_identity());
+        buffer_idx += 128;
+    }
 
 
     let mut transaction = Transaction::new_with_payer(
