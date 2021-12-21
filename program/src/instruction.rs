@@ -163,16 +163,15 @@ pub fn pod_from_bytes<T: Pod>(bytes: &[u8]) -> Option<&T> {
 
 
 #[cfg(not(target_arch = "bpf"))]
-#[cfg(not(target_arch = "bpf"))]
 pub fn write_bytes(
-    compute_buffer: Pubkey,
+    buffer: Pubkey,
     authority: Pubkey,
     offset: u32,
     finalized: bool,
     bytes: &[u8],
 ) -> Instruction {
     let accounts = vec![
-        AccountMeta::new(compute_buffer, false),
+        AccountMeta::new(buffer, false),
         AccountMeta::new_readonly(authority, true),
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
@@ -186,6 +185,47 @@ pub fn write_bytes(
         accounts,
         data,
     }
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn write_input_buffer(
+    input_buffer: Pubkey,
+    authority: Pubkey,
+    points: &[[u8; 32]],
+    scalars: &[crate::scalar::Scalar],
+) -> Vec<Instruction> {
+    assert_eq!(points.len(), scalars.len());
+
+    use crate::traits::Identity;
+    return vec![
+        // write the points
+        write_bytes(
+            input_buffer,
+            authority,
+            HEADER_SIZE as u32,
+            false,
+            bytemuck::cast_slice::<[u8; 32], u8>(points)
+        ),
+
+        // write the scalars
+        write_bytes(
+            input_buffer,
+            authority,
+            (HEADER_SIZE + scalars.len() * 32) as u32,
+            false,
+            bytemuck::cast_slice::<[u8; 32], u8>(
+                scalars.iter().map(|s| s.bytes).collect::<Vec<_>>().as_slice()),
+        ),
+
+        // write identity for results
+        write_bytes(
+            input_buffer,
+            authority,
+            (HEADER_SIZE + scalars.len() * 32 * 2) as u32,
+            true,
+            &crate::edwards::EdwardsPoint::identity().to_bytes(),
+        ),
+    ];
 }
 
 #[cfg(not(target_arch = "bpf"))]

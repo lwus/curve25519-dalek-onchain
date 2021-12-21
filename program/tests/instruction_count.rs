@@ -45,13 +45,14 @@ async fn test_pow22501_p1() {
         242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
     ];
 
+    use curve25519_dalek_onchain::scalar::Scalar;
     let scalars = vec![
-        curve25519_dalek_onchain::scalar::Scalar::one(),
-        curve25519_dalek_onchain::scalar::Scalar::one(),
-        curve25519_dalek_onchain::scalar::Scalar::one(),
-        curve25519_dalek_onchain::scalar::Scalar::one(),
-        curve25519_dalek_onchain::scalar::Scalar::one(),
-        curve25519_dalek_onchain::scalar::Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
     ];
 
     let points = vec![
@@ -137,46 +138,13 @@ async fn test_pow22501_p1() {
         }
     }
 
-    // write the points
-    let mut points_as_bytes = vec![];
-    for i in 0..points.len(){
-        points_as_bytes.extend_from_slice(&points[i]);
-    }
-    instructions.push(
-        instruction::write_bytes(
+    instructions.extend_from_slice(
+        instruction::write_input_buffer(
             input_buffer.pubkey(),
             payer.pubkey(),
-            instruction::HEADER_SIZE as u32,
-            false,
-            points_as_bytes.as_slice()
-        ),
-    );
-
-    // write the scalars
-    let mut scalars_as_bytes = vec![];
-    for i in 0..scalars.len() {
-        scalars_as_bytes.extend_from_slice(&scalars[i].bytes);
-    }
-    instructions.push(
-        instruction::write_bytes(
-            input_buffer.pubkey(),
-            payer.pubkey(),
-            (instruction::HEADER_SIZE + scalars.len() * 32) as u32,
-            false,
-            scalars_as_bytes.as_slice()
-        ),
-    );
-
-    // write identity for results
-     use curve25519_dalek_onchain::traits::Identity;
-    instructions.push(
-        instruction::write_bytes(
-            input_buffer.pubkey(),
-            payer.pubkey(),
-            (instruction::HEADER_SIZE + scalars.len() * 32 * 2) as u32,
-            true,
-            &curve25519_dalek_onchain::edwards::EdwardsPoint::identity().to_bytes(),
-        ),
+            points.as_slice(),
+            scalars.as_slice(),
+        ).as_slice(),
     );
 
     let mut transaction = Transaction::new_with_payer(
