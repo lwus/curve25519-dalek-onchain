@@ -258,15 +258,6 @@ fn process_demo(
 
     let instructions_per_tx = 32;
     let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    for _i in 0..num_cranks {
-        instructions.push(
-            instruction::crank_compute(
-                instruction_buffer.pubkey(),
-                input_buffer.pubkey(),
-                compute_buffer.pubkey(),
-            ),
-        );
-    }
     let mut current = 0;
     while current < num_cranks {
         instructions.clear();
