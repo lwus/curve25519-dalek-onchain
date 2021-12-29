@@ -668,7 +668,7 @@ version = "3.2.0"
 dependencies = [
  "byteorder",
  "digest 0.9.0",
- "rand_core 0.5.1",
+ "rand_core 0.6.3",
  "serde",
  "subtle",
  "zeroize",
@@ -700,7 +700,7 @@ dependencies = [
  "num-traits",
  "proptest",
  "rand 0.7.3",
- "rand_core 0.5.1",
+ "rand_core 0.6.3",
  "solana-program",
  "solana-program-test",
  "solana-sdk",
