@@ -269,6 +269,13 @@ where
         return Err(ProgramError::InvalidArgument);
     }
 
+    use solana_program::sysvar::Sysvar;
+    let rent = solana_program::rent::Rent::get()?;
+    if !rent.is_exempt(buffer_info.lamports(), buffer_info.data_len()) {
+        msg!("Buffer is not rent exempt");
+        return Err(ProgramError::InvalidArgument);
+    }
+
     let mut buffer_data = buffer_info.try_borrow_mut_data()?;
 
     if buffer_data[0] != Key::Uninitialized as u8 {
