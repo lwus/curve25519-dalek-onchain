@@ -27,6 +27,7 @@ pub enum Curve25519Instruction {
     WriteBytes,
     CrankCompute,
     CloseBuffer,
+    Noop,
 }
 
 // TODO: move to state
@@ -309,6 +310,20 @@ pub fn crank_compute(
         program_id: crate::ID,
         accounts,
         data: vec![ToPrimitive::to_u8(&Curve25519Instruction::CrankCompute).unwrap()],
+    }
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn noop(
+) -> Instruction {
+    let accounts = vec![
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: vec![ToPrimitive::to_u8(&Curve25519Instruction::Noop).unwrap()],
     }
 }
 

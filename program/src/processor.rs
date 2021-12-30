@@ -95,6 +95,10 @@ pub fn process_instruction(
                 accounts,
             )
         }
+        Curve25519Instruction::Noop => {
+            msg!("Noop");
+            Ok(())
+        }
     }
 }
 
