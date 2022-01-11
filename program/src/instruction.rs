@@ -1,6 +1,5 @@
 use {
     borsh::{BorshDeserialize, BorshSerialize},
-    bytemuck::{Pod},
     num_derive::{FromPrimitive, ToPrimitive},
     num_traits::{FromPrimitive},
     solana_program::{
@@ -135,33 +134,6 @@ pub fn decode_instruction_type<T: FromPrimitive>(
         FromPrimitive::from_u8(input[0]).ok_or(ProgramError::InvalidInstructionData)
     }
 }
-
-pub fn decode_instruction_data<T: Pod>(
-    input: &[u8]
-) -> Result<&T, ProgramError> {
-    if input.len() < 2 {
-        Err(ProgramError::InvalidInstructionData)
-    } else {
-        pod_from_bytes(&input[1..]).ok_or(ProgramError::InvalidArgument)
-    }
-}
-
-pub fn decode_dsl_instruction_data<T: Pod>(
-    input: &[u8],
-) -> Result<&T, ProgramError> {
-    if input.len() < 2 {
-        Err(ProgramError::InvalidInstructionData)
-    } else {
-        pod_from_bytes(&input[1..1+std::mem::size_of::<T>()])
-            .ok_or(ProgramError::InvalidArgument)
-    }
-}
-
-/// Convert a slice into a `Pod` (zero copy)
-pub fn pod_from_bytes<T: Pod>(bytes: &[u8]) -> Option<&T> {
-    bytemuck::try_from_bytes(bytes).ok()
-}
-
 
 #[cfg(not(target_arch = "bpf"))]
 pub fn write_bytes(

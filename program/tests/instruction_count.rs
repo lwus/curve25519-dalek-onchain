@@ -56,8 +56,8 @@ async fn test_pow22501_p1() {
     let points = vec![
         element_bytes,
         element_bytes,
-        element_bytes,
-        element_bytes,
+        neg_element_bytes,
+        neg_element_bytes,
     ];
 
     assert_eq!(scalars.len(), points.len());
