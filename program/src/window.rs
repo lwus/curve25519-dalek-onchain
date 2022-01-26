@@ -91,3 +91,11 @@ impl<'a> From<&'a EdwardsPoint> for $name<ProjectiveNielsPoint> {
 // The first one has to be named "LookupTable" because it's used as a constructor for consts.
 impl_lookup_table! {Name = LookupTable,         Size =   8, SizeNeg =   -8, SizeRange = 1 ..   9, ConversionRange = 0 ..   7} // radix-16
 
+unsafe impl bytemuck::Zeroable for LookupTable<ProjectiveNielsPoint> {
+}
+unsafe impl bytemuck::Pod for LookupTable<ProjectiveNielsPoint> {
+}
+impl LookupTable<ProjectiveNielsPoint> {
+    pub const TABLE_SIZE: usize = 40 * 4 * 8;
+}
+

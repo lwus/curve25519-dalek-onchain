@@ -10,6 +10,10 @@ use {
 
 #[cfg(not(target_arch = "bpf"))]
 use {
+    crate::{
+        window::LookupTable,
+        edwards::ProjectiveNielsPoint,
+    },
     num_traits::ToPrimitive,
     solana_program::{
         instruction::{AccountMeta, Instruction},
@@ -332,7 +336,7 @@ pub fn transer_proof_instructions(
 
     let scalars_offset = scratch_space + scratch_space_size;
     let tables_offset  = scalars_offset + 32 * num_proof_scalars;
-    let table_size = 32 * 4 * 8;
+    let table_size = LookupTable::<ProjectiveNielsPoint>::TABLE_SIZE;
 
     let mut instructions = vec![];
 
@@ -420,7 +424,7 @@ pub fn transer_proof_instructions(
             );
         }
         scalars_offset += group_size * 32;
-        tables_offset += group_size * 32 * 4 * 8;
+        tables_offset += group_size * table_size;
         result_offset += 32 * 4;
     }
 

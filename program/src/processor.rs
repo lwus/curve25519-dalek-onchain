@@ -787,12 +787,10 @@ fn process_build_lookup_table(
 
     drop(compute_buffer_data);
     let mut table_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-    let mut table_offset = data.table_offset as usize;
-    for i in 0..table.0.len() {
-        table_buffer_data[table_offset..table_offset+128].copy_from_slice(
-            &table.0[i].to_bytes());
-        table_offset += 128;
-    }
+    let table_offset = data.table_offset as usize;
+    type LUT = LookupTable::<ProjectiveNielsPoint>;
+    table_buffer_data[table_offset..table_offset + LUT::TABLE_SIZE].copy_from_slice(
+        bytemuck::cast_slice::<LUT, u8>(std::slice::from_ref(&table)));
 
     Ok(())
 }
@@ -808,21 +806,11 @@ fn process_multiscalar_mul(
     }
 
     // deserialize lookup tables
-    let mut lookup_tables = Vec::with_capacity(num_inputs);
     let compute_buffer_data = compute_buffer_info.try_borrow_data()?;
-
-    let mut table_offset = u32::from(data.tables_offset) as usize;
-    for _i in 0..num_inputs {
-        let mut buffer: [ProjectiveNielsPoint; 8] = Default::default();
-        // table_offset tracks the ProjectiveNielsPoint offset inside the loop
-        for j in 0..8 {
-            buffer[j] = ProjectiveNielsPoint::from_bytes(
-                &compute_buffer_data[table_offset..table_offset+128]
-            );
-            table_offset += 128;
-        }
-        lookup_tables.push(LookupTable(buffer));
-    }
+    let table_offset = u32::from(data.tables_offset) as usize;
+    type LUT = LookupTable::<ProjectiveNielsPoint>;
+    let lookup_tables = bytemuck::cast_slice::<u8, LUT>(
+        &compute_buffer_data[table_offset..table_offset + LUT::TABLE_SIZE * num_inputs]);
 
     // deserialize scalars
     // TODO: just encode the radix_16 values directly?
