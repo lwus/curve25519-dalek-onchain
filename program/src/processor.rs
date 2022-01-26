@@ -239,6 +239,21 @@ fn process_dsl_instruction(
             )
         }
 
+        DSLInstruction::ElligatorInit(RunDecompressData{ offset }) => {
+            msg!("ElligatorInit");
+            process_elligator_init(
+                compute_buffer_info,
+                offset,
+            )
+        }
+        DSLInstruction::ElligatorFini(RunDecompressData{ offset }) => {
+            msg!("ElligatorFini");
+            process_elligator_fini(
+                compute_buffer_info,
+                offset,
+            )
+        }
+
         DSLInstruction::BuildLookupTable(data) => {
             msg!("BuildLookupTable");
             process_build_lookup_table(
@@ -588,6 +603,8 @@ fn process_pow22501_p2(
     let offset = offset + 32;
     compute_buffer_data[offset..offset+32].copy_from_slice(&t19.to_bytes());
 
+    msg!("pow25501_p2 {} {:?}", offset, &compute_buffer_data[offset..offset+32]);
+
     Ok(())
 }
 
@@ -634,6 +651,120 @@ fn process_decompress_fini(
     let offset = offset + 32;
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.0.to_bytes());
+
+    Ok(())
+}
+
+fn process_elligator_init(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let i = &constants::SQRT_M1;
+    let d = &constants::EDWARDS_D;
+    let one_minus_d_sq = &constants::ONE_MINUS_EDWARDS_D_SQUARED;
+    let c = constants::MINUS_ONE;
+
+    let one = FieldElement::one();
+
+    let r_0 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let r = i * &r_0.square();
+    let N_s = &(&r + &one) * &one_minus_d_sq;
+    let D = &(&c - &(d * &r)) * &(&r + d);
+
+    // renaming for prep for pow25501
+    let u = N_s;
+    let v = D;
+
+    let v3 = &v.square()  * &v;
+    let v7 = &v3.square() * &v;
+
+    let pow_p22501_input = &u * &v7;
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+
+    Ok(())
+}
+
+fn process_elligator_fini(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let i = &constants::SQRT_M1;
+    let d = &constants::EDWARDS_D;
+    let one_minus_d_sq = &constants::ONE_MINUS_EDWARDS_D_SQUARED;
+    let d_minus_one_sq = &constants::EDWARDS_D_MINUS_ONE_SQUARED;
+    let mut c = constants::MINUS_ONE;
+
+    let one = FieldElement::one();
+
+    let r_0 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let r = i * &r_0.square();
+    let N_s = &(&r + &one) * &one_minus_d_sq;
+    let D = &(&c - &(d * &r)) * &(&r + d);
+
+    let offset = offset + 32 * 5;
+    let (Ns_D_is_sq, mut s) = {
+        // renaming for prep for pow25501
+        let u = N_s;
+        let v = D;
+
+        let v3 = &v.square()  * &v;
+        let v7 = &v3.square() * &v;
+
+        let pow_p22501_input = &u * &v7;
+
+        let pow_p22501_output = FieldElement::from_bytes(
+            compute_buffer_data[offset..offset+32]
+                .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+        );
+
+        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
+
+        let r = &(&u * &v3) * &pow_p58_output;
+
+        FieldElement::sqrt_ratio_i(&u, &v, &r)
+    };
+
+    use subtle::{ConditionallySelectable, ConditionallyNegatable};
+    let mut s_prime = &s * &r_0;
+    let s_prime_is_pos = !s_prime.is_negative();
+    s_prime.conditional_negate(s_prime_is_pos);
+
+    s.conditional_assign(&s_prime, !Ns_D_is_sq);
+    c.conditional_assign(&r, !Ns_D_is_sq);
+
+    let N_t = &(&(&c * &(&r - &one)) * &d_minus_one_sq) - &D;
+    let s_sq = s.square();
+
+    // The conversion from W_i is exactly the conversion from P1xP1.
+    let res = RistrettoPoint(CompletedPoint{
+        X: &(&s + &s) * &D,
+        Z: &N_t * &constants::SQRT_AD_MINUS_ONE,
+        Y: &FieldElement::one() - &s_sq,
+        T: &FieldElement::one() + &s_sq,
+    }.to_extended());
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+128].copy_from_slice(
+        &res.0.to_bytes());
+
 
     Ok(())
 }

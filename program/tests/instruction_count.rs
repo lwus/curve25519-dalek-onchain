@@ -4,6 +4,7 @@ use {
     solana_program::pubkey::Pubkey,
     solana_program_test::*,
     solana_sdk::{
+        compute_budget::ComputeBudgetInstruction,
         signer::keypair::Keypair,
         signature::Signer,
         system_instruction,
@@ -17,7 +18,7 @@ use {
 };
 
 #[tokio::test]
-async fn test_pow22501_p1() {
+async fn test_multiscalar_mul() {
     let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
 
     // pc.set_bpf_compute_max_units(350_000);
@@ -208,4 +209,160 @@ async fn test_pow22501_p1() {
     );
     transaction.sign(&[&payer], recent_blockhash);
     banks_client.process_transaction(transaction).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_elligator() {
+    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
+
+    // pc.set_bpf_compute_max_units(350_000);
+
+    let (mut banks_client, payer, recent_blockhash) = pc.start().await;
+
+    let rent = banks_client.get_rent().await;
+    let rent = rent.unwrap();
+
+    let compute_buffer = Keypair::new();
+    let input_buffer = Keypair::new();
+    let instruction_buffer = Keypair::new();
+
+    // TODO
+    let hash_bytes = [
+        0, 1, 2, 3, 4, 5, 6, 7,
+        0, 1, 2, 3, 4, 5, 6, 7,
+        0, 1, 2, 3, 4, 5, 6, 7,
+        0, 1, 2, 3, 4, 5, 6, 7,
+    ];
+
+    let dsl = instruction::elligator_to_curve_instructions();
+
+    let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
+    let input_buffer_len = instruction::HEADER_SIZE + 32;
+
+    // scratch + result space
+    let compute_buffer_len = instruction::HEADER_SIZE + 1000;
+
+    let mut instructions = vec![
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &instruction_buffer.pubkey(),
+            rent.minimum_balance(instruction_buffer_len),
+            instruction_buffer_len as u64,
+            &id(),
+        ),
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &input_buffer.pubkey(),
+            rent.minimum_balance(input_buffer_len),
+            input_buffer_len as u64,
+            &id(),
+        ),
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &compute_buffer.pubkey(),
+            rent.minimum_balance(compute_buffer_len),
+            compute_buffer_len as u64,
+            &id(),
+        ),
+        instruction::initialize_buffer(
+            instruction_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::Key::InstructionBufferV1,
+            vec![],
+        ),
+        instruction::initialize_buffer(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::Key::InputBufferV1,
+            vec![],
+        ),
+        instruction::initialize_buffer(
+            compute_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::Key::ComputeBufferV1,
+            vec![instruction_buffer.pubkey(), input_buffer.pubkey()],
+        ),
+    ];
+
+    // write the instructions
+    let mut dsl_idx = 0;
+    let dsl_chunk = 800;
+    loop {
+        let end = (dsl_idx+dsl_chunk).min(dsl.len());
+        let done = end == dsl.len();
+        instructions.push(
+            instruction::write_bytes(
+                instruction_buffer.pubkey(),
+                payer.pubkey(),
+                (instruction::HEADER_SIZE + dsl_idx) as u32,
+                done,
+                &dsl[dsl_idx..end],
+            )
+        );
+        if done {
+            break;
+        } else {
+            dsl_idx = end;
+        }
+    }
+
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::HEADER_SIZE as u32,
+            true,
+            &hash_bytes,
+        ),
+    );
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer, &instruction_buffer, &input_buffer, &compute_buffer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+
+    instructions.clear();
+
+    instructions.push(
+        ComputeBudgetInstruction::request_units(500_000),
+    );
+    // crank baby
+    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
+    for _i in 0..num_cranks {
+        instructions.push(
+            instruction::crank_compute(
+                instruction_buffer.pubkey(),
+                input_buffer.pubkey(),
+                compute_buffer.pubkey(),
+            ),
+        );
+    }
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+
+    let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 6;
+    let elligator_result_bytes = &account.data[buffer_idx..128+buffer_idx];
+    let elligator_result = curve25519_dalek::edwards::EdwardsPoint::from_bytes(
+        elligator_result_bytes
+    );
+
+    println!("F {:?}", &curve25519_dalek::field::FieldElement::from_bytes(&hash_bytes));
+    println!("Elligator {:x?}", elligator_result_bytes);
+
+    assert_eq!(
+        elligator_result,
+        curve25519_dalek::ristretto::RistrettoPoint::elligator_ristretto_flavor(
+            &curve25519_dalek::field::FieldElement::from_bytes(&hash_bytes),
+        ).0,
+    );
 }
