@@ -180,25 +180,41 @@ async fn test_multiscalar_mul() {
     banks_client.process_transaction(transaction).await.unwrap();
 
 
-    instructions.clear();
     // crank baby
     let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    for _i in 0..num_cranks {
-        instructions.push(
-            instruction::crank_compute(
-                instruction_buffer.pubkey(),
-                input_buffer.pubkey(),
-                compute_buffer.pubkey(),
-            ),
-        );
-    }
+    let instructions_per_tx = 10; // empirical...
 
-    let mut transaction = Transaction::new_with_payer(
-        instructions.as_slice(),
-        Some(&payer.pubkey()),
-    );
-    transaction.sign(&[&payer], recent_blockhash);
-    banks_client.process_transaction(transaction).await.unwrap();
+    let mut current = 0;
+    while current < num_cranks {
+        println!("cranking... {}", current);
+        instructions.clear();
+        instructions.push(
+            ComputeBudgetInstruction::request_units(1_000_000),
+        );
+        instructions.push(
+            instruction::noop(current.try_into().unwrap())
+        );
+        for _j in 0..instructions_per_tx {
+            if current >= num_cranks {
+                break;
+            }
+            current += 1;
+            instructions.push(
+                instruction::crank_compute(
+                    instruction_buffer.pubkey(),
+                    input_buffer.pubkey(),
+                    compute_buffer.pubkey(),
+                ),
+            );
+        }
+
+        let mut transaction = Transaction::new_with_payer(
+            instructions.as_slice(),
+            Some(&payer.pubkey()),
+        );
+        transaction.sign(&[&payer], recent_blockhash);
+        banks_client.process_transaction(transaction).await.unwrap();
+    }
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
 
