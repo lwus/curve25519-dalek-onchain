@@ -290,15 +290,19 @@ pub fn crank_compute(
 
 #[cfg(not(target_arch = "bpf"))]
 pub fn noop(
+    discriminant: u64,
 ) -> Instruction {
     let accounts = vec![
         AccountMeta::new_readonly(solana_program::system_program::id(), false),
     ];
 
+    let mut data = vec![ToPrimitive::to_u8(&Curve25519Instruction::Noop).unwrap()];
+    data.extend_from_slice(&discriminant.to_le_bytes());
+
     Instruction {
         program_id: crate::ID,
         accounts,
-        data: vec![ToPrimitive::to_u8(&Curve25519Instruction::Noop).unwrap()],
+        data,
     }
 }
 
