@@ -822,7 +822,10 @@ fn process_multiscalar_mul(
         scalar_digits_vec.push(scalar::Scalar{ bytes }.to_radix_16());
         scalar_offset += 32;
     }
-    let scalar_digits = zeroize::Zeroizing::new(scalar_digits_vec);
+
+    // probably don't need this since everything is public anyway...
+    let scalar_digits = scalar_digits_vec;
+    // let scalar_digits = zeroize::Zeroizing::new(scalar_digits_vec);
 
     // deserialize point computation
     let result_offset = u32::from(data.result_offset) as usize;
