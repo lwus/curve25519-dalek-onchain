@@ -1,13 +1,14 @@
 #![cfg(feature = "test-bpf")]
 
 use {
-    solana_program::pubkey::Pubkey,
     solana_program_test::*,
     solana_sdk::{
         compute_budget::ComputeBudgetInstruction,
+        instruction::Instruction,
         signer::keypair::Keypair,
         signature::Signer,
         system_instruction,
+        sysvar::rent::Rent,
         transaction::Transaction,
     },
     curve25519_dalek_onchain::{
@@ -15,7 +16,61 @@ use {
         instruction,
         processor::process_instruction,
     },
+    std::convert::TryInto,
 };
+
+fn create_buffer_instructions(
+    payer: &dyn Signer,
+    rent: &Rent,
+    instruction_buffer: &Keypair,
+    instruction_buffer_len: usize,
+    input_buffer: &Keypair,
+    input_buffer_len: usize,
+    compute_buffer: &Keypair,
+    compute_buffer_len: usize,
+) -> [Instruction; 6] {
+    [
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &instruction_buffer.pubkey(),
+            rent.minimum_balance(instruction_buffer_len),
+            instruction_buffer_len as u64,
+            &id(),
+        ),
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &input_buffer.pubkey(),
+            rent.minimum_balance(input_buffer_len),
+            input_buffer_len as u64,
+            &id(),
+        ),
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &compute_buffer.pubkey(),
+            rent.minimum_balance(compute_buffer_len),
+            compute_buffer_len as u64,
+            &id(),
+        ),
+        instruction::initialize_buffer(
+            instruction_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::Key::InstructionBufferV1,
+            vec![],
+        ),
+        instruction::initialize_buffer(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::Key::InputBufferV1,
+            vec![],
+        ),
+        instruction::initialize_buffer(
+            compute_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::Key::ComputeBufferV1,
+            vec![instruction_buffer.pubkey(), input_buffer.pubkey()],
+        ),
+    ]
+}
 
 #[tokio::test]
 async fn test_multiscalar_mul() {
@@ -72,47 +127,19 @@ async fn test_multiscalar_mul() {
     // pick a large number... at least > 8 * 128 * scalars.len()
     let compute_buffer_len = instruction::HEADER_SIZE + 10000;
 
-    let mut instructions = vec![
-        system_instruction::create_account(
-            &payer.pubkey(),
-            &instruction_buffer.pubkey(),
-            rent.minimum_balance(instruction_buffer_len),
-            instruction_buffer_len as u64,
-            &id(),
+    let mut instructions = vec![];
+    instructions.extend_from_slice(
+        &create_buffer_instructions(
+            &payer,
+            &rent,
+            &instruction_buffer,
+            instruction_buffer_len,
+            &input_buffer,
+            input_buffer_len,
+            &compute_buffer,
+            compute_buffer_len,
         ),
-        system_instruction::create_account(
-            &payer.pubkey(),
-            &input_buffer.pubkey(),
-            rent.minimum_balance(input_buffer_len),
-            input_buffer_len as u64,
-            &id(),
-        ),
-        system_instruction::create_account(
-            &payer.pubkey(),
-            &compute_buffer.pubkey(),
-            rent.minimum_balance(compute_buffer_len),
-            compute_buffer_len as u64,
-            &id(),
-        ),
-        instruction::initialize_buffer(
-            instruction_buffer.pubkey(),
-            payer.pubkey(),
-            instruction::Key::InstructionBufferV1,
-            vec![],
-        ),
-        instruction::initialize_buffer(
-            input_buffer.pubkey(),
-            payer.pubkey(),
-            instruction::Key::InputBufferV1,
-            vec![],
-        ),
-        instruction::initialize_buffer(
-            compute_buffer.pubkey(),
-            payer.pubkey(),
-            instruction::Key::ComputeBufferV1,
-            vec![instruction_buffer.pubkey(), input_buffer.pubkey()],
-        ),
-    ];
+    );
 
     // write the instructions
     let mut dsl_idx = 0;
@@ -242,47 +269,19 @@ async fn test_elligator() {
     // scratch + result space
     let compute_buffer_len = instruction::HEADER_SIZE + 1000;
 
-    let mut instructions = vec![
-        system_instruction::create_account(
-            &payer.pubkey(),
-            &instruction_buffer.pubkey(),
-            rent.minimum_balance(instruction_buffer_len),
-            instruction_buffer_len as u64,
-            &id(),
+    let mut instructions = vec![];
+    instructions.extend_from_slice(
+        &create_buffer_instructions(
+            &payer,
+            &rent,
+            &instruction_buffer,
+            instruction_buffer_len,
+            &input_buffer,
+            input_buffer_len,
+            &compute_buffer,
+            compute_buffer_len,
         ),
-        system_instruction::create_account(
-            &payer.pubkey(),
-            &input_buffer.pubkey(),
-            rent.minimum_balance(input_buffer_len),
-            input_buffer_len as u64,
-            &id(),
-        ),
-        system_instruction::create_account(
-            &payer.pubkey(),
-            &compute_buffer.pubkey(),
-            rent.minimum_balance(compute_buffer_len),
-            compute_buffer_len as u64,
-            &id(),
-        ),
-        instruction::initialize_buffer(
-            instruction_buffer.pubkey(),
-            payer.pubkey(),
-            instruction::Key::InstructionBufferV1,
-            vec![],
-        ),
-        instruction::initialize_buffer(
-            input_buffer.pubkey(),
-            payer.pubkey(),
-            instruction::Key::InputBufferV1,
-            vec![],
-        ),
-        instruction::initialize_buffer(
-            compute_buffer.pubkey(),
-            payer.pubkey(),
-            instruction::Key::ComputeBufferV1,
-            vec![instruction_buffer.pubkey(), input_buffer.pubkey()],
-        ),
-    ];
+    );
 
     // write the instructions
     let mut dsl_idx = 0;
