@@ -26,16 +26,16 @@ byteorder = { version = "^1.2.3", default-features = false, features = ["i128"] 
 digest = { version = "0.9", default-features = false }
 num-derive = "0.3"
 num-traits = "0.2"
-solana-program = "1.7.15"
+solana-program = "=1.9.4"
 subtle = { version = "^2.2.1", default-features = false }
 zeroize = { version = "1", default-features = false }
-[target.'cfg(not(target_arch = "bpf"))'.dependencies]
 
+[target.'cfg(not(target_arch = "bpf"))'.dependencies]
 rand_core = { version = "0.6.3", default-features = false }
 
 [dev-dependencies]
-solana-program-test = "1.6.7"
-solana-sdk = { version = "1.6.7", default-features = false }
+solana-program-test = "1.9.4"
+solana-sdk = { version = "1.9.4", default-features = false }
 proptest = "0.10"
 rand = "0.7"
-curve25519-dalek = { path = "/Users/lwu/code/solana/curve25519-dalek", features = ["serde"] }
+curve25519-dalek = { git = "https://github.com/lwus/curve25519-dalek", features = ["serde"] }
