@@ -72,6 +72,34 @@ fn create_buffer_instructions(
     ]
 }
 
+fn write_dsl_instructions(
+    instructions: &mut Vec<Instruction>,
+    dsl: &[u8],
+    payer: &dyn Signer,
+    instruction_buffer: &Keypair,
+) {
+    let mut dsl_idx = 0;
+    let dsl_chunk = 800;
+    loop {
+        let end = (dsl_idx+dsl_chunk).min(dsl.len());
+        let done = end == dsl.len();
+        instructions.push(
+            instruction::write_bytes(
+                instruction_buffer.pubkey(),
+                payer.pubkey(),
+                (instruction::HEADER_SIZE + dsl_idx) as u32,
+                done,
+                &dsl[dsl_idx..end],
+            )
+        );
+        if done {
+            break;
+        } else {
+            dsl_idx = end;
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_multiscalar_mul() {
     let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
@@ -141,27 +169,7 @@ async fn test_multiscalar_mul() {
         ),
     );
 
-    // write the instructions
-    let mut dsl_idx = 0;
-    let dsl_chunk = 800;
-    loop {
-        let end = (dsl_idx+dsl_chunk).min(dsl.len());
-        let done = end == dsl.len();
-        instructions.push(
-            instruction::write_bytes(
-                instruction_buffer.pubkey(),
-                payer.pubkey(),
-                (instruction::HEADER_SIZE + dsl_idx) as u32,
-                done,
-                &dsl[dsl_idx..end],
-            )
-        );
-        if done {
-            break;
-        } else {
-            dsl_idx = end;
-        }
-    }
+    write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
 
     instructions.extend_from_slice(
         instruction::write_input_buffer(
@@ -299,27 +307,7 @@ async fn test_elligator() {
         ),
     );
 
-    // write the instructions
-    let mut dsl_idx = 0;
-    let dsl_chunk = 800;
-    loop {
-        let end = (dsl_idx+dsl_chunk).min(dsl.len());
-        let done = end == dsl.len();
-        instructions.push(
-            instruction::write_bytes(
-                instruction_buffer.pubkey(),
-                payer.pubkey(),
-                (instruction::HEADER_SIZE + dsl_idx) as u32,
-                done,
-                &dsl[dsl_idx..end],
-            )
-        );
-        if done {
-            break;
-        } else {
-            dsl_idx = end;
-        }
-    }
+    write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
 
     instructions.push(
         instruction::write_bytes(
@@ -427,27 +415,7 @@ async fn test_edwards_decompress() {
         ),
     );
 
-    // write the instructions
-    let mut dsl_idx = 0;
-    let dsl_chunk = 800;
-    loop {
-        let end = (dsl_idx+dsl_chunk).min(dsl.len());
-        let done = end == dsl.len();
-        instructions.push(
-            instruction::write_bytes(
-                instruction_buffer.pubkey(),
-                payer.pubkey(),
-                (instruction::HEADER_SIZE + dsl_idx) as u32,
-                done,
-                &dsl[dsl_idx..end],
-            )
-        );
-        if done {
-            break;
-        } else {
-            dsl_idx = end;
-        }
-    }
+    write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
 
     instructions.push(
         instruction::write_bytes(
