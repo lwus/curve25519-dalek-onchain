@@ -603,8 +603,6 @@ fn process_pow22501_p2(
     let offset = offset + 32;
     compute_buffer_data[offset..offset+32].copy_from_slice(&t19.to_bytes());
 
-    msg!("pow25501_p2 {} {:?}", offset, &compute_buffer_data[offset..offset+32]);
-
     Ok(())
 }
 
@@ -643,8 +641,6 @@ fn process_decompress_fini(
         compute_buffer_data[offset..offset+32]
             .try_into().map_err(|_| ProgramError::InvalidArgument)?,
     );
-
-    msg!("I {:?}", element.to_bytes());
 
     let res = point.decompress_fini(&element).ok_or(ProgramError::InvalidArgument)?;
 
@@ -779,8 +775,6 @@ fn process_build_lookup_table(
     let point = EdwardsPoint::from_bytes(
         &compute_buffer_data[point_offset..point_offset+128]
     );
-
-    msg!("Read point {} {:?}", point_offset, point);
 
     let table = LookupTable::<ProjectiveNielsPoint>::from(&point);
 
