@@ -88,18 +88,10 @@ pub enum DSLInstruction {
     BuildLookupTable(BuildLookupTableData),
     MultiscalarMul(MultiscalarMulData),
 
-    DecompressEdwardsInit(RunDecompressData),
-    DecompressEdwardsFini(RunDecompressData),
-
-    ElligatorInit(RunDecompressData),
-    ElligatorFini(RunDecompressData),
-
-    MontgomeryElligatorInit(RunDecompressData),
-    MontgomeryElligatorMidi(RunDecompressData),
-    MontgomeryElligatorFini(RunDecompressData),
-
-    MontgomeryToEdwardsInit(RunDecompressData),
-    MontgomeryToEdwardsMidi(MontgomeryToEdwardsData),
+    DecompressEdwards(RunSplitComputeData), // 2 steps
+    Elligator(RunSplitComputeData), // 2 steps
+    MontgomeryElligator(RunSplitComputeData), // 3 steps
+    MontgomeryToEdwards(MontgomeryToEdwardsData), // 2 steps
     InPlaceMulByCofactor(RunDecompressData),
 }
 
@@ -122,9 +114,17 @@ pub struct RunDecompressData {
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
+pub struct RunSplitComputeData {
+    pub offset: u32,
+    pub step: u8,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
+#[repr(C)]
 pub struct MontgomeryToEdwardsData {
     pub offset: u32,
     pub sign_offset: u32,
+    pub step: u8,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
@@ -471,8 +471,9 @@ pub fn elligator_to_curve_instructions() -> Vec<u8> {
             compute_offset: scratch_space,
             bytes: 32,
         }),
-        DSLInstruction::ElligatorInit(RunDecompressData{
+        DSLInstruction::Elligator(RunSplitComputeData{
             offset: scratch_space,
+            step: 0,
         }),
         DSLInstruction::Pow22501P1(RunDecompressData{
             offset: scratch_space + 32,
@@ -480,8 +481,9 @@ pub fn elligator_to_curve_instructions() -> Vec<u8> {
         DSLInstruction::Pow22501P2(RunDecompressData{
             offset: scratch_space + 64,
         }),
-        DSLInstruction::ElligatorFini(RunDecompressData{
+        DSLInstruction::Elligator(RunSplitComputeData{
             offset: scratch_space,
+            step: 1,
         }),
     ]);
 
@@ -510,8 +512,9 @@ pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
             compute_offset: scratch_space,
             bytes: 32,
         }),
-        DSLInstruction::MontgomeryElligatorInit(RunDecompressData{
+        DSLInstruction::MontgomeryElligator(RunSplitComputeData{
             offset: scratch_space,
+            step: 0,
         }),
         DSLInstruction::Pow22501P1(RunDecompressData{
             offset: scratch_space + 32,
@@ -519,8 +522,9 @@ pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
         DSLInstruction::Pow22501P2(RunDecompressData{
             offset: scratch_space + 32 * 2,
         }),
-        DSLInstruction::MontgomeryElligatorMidi(RunDecompressData{
+        DSLInstruction::MontgomeryElligator(RunSplitComputeData{
             offset: scratch_space,
+            step: 1,
         }),
         DSLInstruction::Pow22501P1(RunDecompressData{
             offset: scratch_space + 32 * 6,
@@ -528,13 +532,16 @@ pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
         DSLInstruction::Pow22501P2(RunDecompressData{
             offset: scratch_space + 32 * 7,
         }),
-        DSLInstruction::MontgomeryElligatorFini(RunDecompressData{
+        DSLInstruction::MontgomeryElligator(RunSplitComputeData{
             offset: scratch_space,
+            step: 2,
         }),
 
         // largely independent now (sans sign bit)
-        DSLInstruction::MontgomeryToEdwardsInit(RunDecompressData{
+        DSLInstruction::MontgomeryToEdwards(MontgomeryToEdwardsData{
             offset: scratch_space + 32 * 11,
+            sign_offset: scratch_space + 31,
+            step: 0,
         }),
         DSLInstruction::Pow22501P1(RunDecompressData{
             offset: scratch_space + 32 * 12,
@@ -542,14 +549,16 @@ pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
         DSLInstruction::Pow22501P2(RunDecompressData{
             offset: scratch_space + 32 * 13,
         }),
-        DSLInstruction::MontgomeryToEdwardsMidi(MontgomeryToEdwardsData{
+        DSLInstruction::MontgomeryToEdwards(MontgomeryToEdwardsData{
             offset: scratch_space + 32 * 11,
             sign_offset: scratch_space + 31,
+            step: 1,
         }),
 
         // independent again
-        DSLInstruction::DecompressEdwardsInit(RunDecompressData{
+        DSLInstruction::DecompressEdwards(RunSplitComputeData{
             offset: scratch_space + 32 * 17,
+            step: 0,
         }),
         DSLInstruction::Pow22501P1(RunDecompressData{
             offset: scratch_space + 32 * 18,
@@ -557,8 +566,9 @@ pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
         DSLInstruction::Pow22501P2(RunDecompressData{
             offset: scratch_space + 32 * 19,
         }),
-        DSLInstruction::DecompressEdwardsFini(RunDecompressData{
+        DSLInstruction::DecompressEdwards(RunSplitComputeData{
             offset: scratch_space + 32 * 17,
+            step: 1,
         }),
         DSLInstruction::InPlaceMulByCofactor(RunDecompressData{
             offset: scratch_space + 32 * 23,
@@ -590,8 +600,9 @@ pub fn decompress_edwards_instructions() -> Vec<u8> {
             compute_offset: scratch_space,
             bytes: 32,
         }),
-        DSLInstruction::DecompressEdwardsInit(RunDecompressData{
+        DSLInstruction::DecompressEdwards(RunSplitComputeData{
             offset: scratch_space,
+            step: 0,
         }),
         DSLInstruction::Pow22501P1(RunDecompressData{
             offset: scratch_space + 32,
@@ -599,8 +610,9 @@ pub fn decompress_edwards_instructions() -> Vec<u8> {
         DSLInstruction::Pow22501P2(RunDecompressData{
             offset: scratch_space + 64,
         }),
-        DSLInstruction::DecompressEdwardsFini(RunDecompressData{
+        DSLInstruction::DecompressEdwards(RunSplitComputeData{
             offset: scratch_space,
+            step: 1,
         }),
     ]);
 

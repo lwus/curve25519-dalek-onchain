@@ -239,71 +239,38 @@ fn process_dsl_instruction(
             )
         }
 
-        DSLInstruction::DecompressEdwardsInit(RunDecompressData{ offset }) => {
-            msg!("DecompressEdwardsInit");
-            process_decompress_edwards_init(
+        DSLInstruction::DecompressEdwards(RunSplitComputeData{ offset, step }) => {
+            msg!("DecompressEdwards {}", step);
+            process_decompress_edwards(
                 compute_buffer_info,
                 offset,
+                step,
             )
         }
-        DSLInstruction::DecompressEdwardsFini(RunDecompressData{ offset }) => {
-            msg!("DecompressEdwardsFini");
-            process_decompress_edwards_fini(
+        DSLInstruction::Elligator(RunSplitComputeData{ offset, step }) => {
+            msg!("Elligator {}", step);
+            process_elligator(
                 compute_buffer_info,
                 offset,
+                step,
             )
         }
-
-        DSLInstruction::ElligatorInit(RunDecompressData{ offset }) => {
-            msg!("ElligatorInit");
-            process_elligator_init(
+        DSLInstruction::MontgomeryElligator(RunSplitComputeData{ offset, step }) => {
+            msg!("MontgomeryElligator {}", step);
+            process_montgomery_elligator(
                 compute_buffer_info,
                 offset,
-            )
-        }
-        DSLInstruction::ElligatorFini(RunDecompressData{ offset }) => {
-            msg!("ElligatorFini");
-            process_elligator_fini(
-                compute_buffer_info,
-                offset,
+                step,
             )
         }
 
-        DSLInstruction::MontgomeryElligatorInit(RunDecompressData{ offset }) => {
-            msg!("MontgomeryElligatorInit");
-            process_montgomery_elligator_init(
-                compute_buffer_info,
-                offset,
-            )
-        }
-        DSLInstruction::MontgomeryElligatorMidi(RunDecompressData{ offset }) => {
-            msg!("MontgomeryElligatorMidi");
-            process_montgomery_elligator_midi(
-                compute_buffer_info,
-                offset,
-            )
-        }
-        DSLInstruction::MontgomeryElligatorFini(RunDecompressData{ offset }) => {
-            msg!("MontgomeryElligatorFini");
-            process_montgomery_elligator_fini(
-                compute_buffer_info,
-                offset,
-            )
-        }
-
-        DSLInstruction::MontgomeryToEdwardsInit(RunDecompressData{ offset }) => {
-            msg!("MontgomeryToEdwardsInit");
-            process_montgomery_to_edwards_init(
-                compute_buffer_info,
-                offset,
-            )
-        }
-        DSLInstruction::MontgomeryToEdwardsMidi(MontgomeryToEdwardsData{ offset, sign_offset }) => {
-            msg!("MontgomeryToEdwardsMidi");
-            process_montgomery_to_edwards_midi(
+        DSLInstruction::MontgomeryToEdwards(MontgomeryToEdwardsData{ offset, sign_offset, step }) => {
+            msg!("MontgomeryToEdwards {}", step);
+            process_montgomery_to_edwards(
                 compute_buffer_info,
                 offset,
                 sign_offset,
+                step,
             )
         }
         // decompress edwards after...
@@ -674,30 +641,10 @@ fn process_decompress_fini(
     Ok(())
 }
 
-fn process_decompress_edwards_init(
+fn process_decompress_edwards(
     compute_buffer_info: &AccountInfo,
     offset: u32,
-) -> ProgramResult {
-    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-
-    let offset = offset as usize;
-    let Y = read_field_element(&compute_buffer_data, offset)?;
-    let Z = FieldElement::one();
-    let YY = Y.square();
-    let u = &YY - &Z;                            // u =  y²-1
-    let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
-
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(
-        &FieldElement::sqrt_ratio_i_pow_p58_input(&u, &v).to_bytes(),
-    );
-
-    Ok(())
-}
-
-fn process_decompress_edwards_fini(
-    compute_buffer_info: &AccountInfo,
-    offset: u32,
+    step: u8,
 ) -> ProgramResult {
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
@@ -708,6 +655,14 @@ fn process_decompress_edwards_fini(
     let YY = Y.square();
     let u = &YY - &Z;                            // u =  y²-1
     let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
+
+    if step == 0 {
+        let offset = offset + 32;
+        compute_buffer_data[offset..offset+32].copy_from_slice(
+            &FieldElement::sqrt_ratio_i_pow_p58_input(&u, &v).to_bytes(),
+        );
+        return Ok(());
+    }
 
     let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let (is_valid_y_coord, mut X) = FieldElement::sqrt_ratio_i_pow_p58_output(&u, &v, &pow_p22501_output);
@@ -730,9 +685,10 @@ fn process_decompress_edwards_fini(
     Ok(())
 }
 
-fn process_elligator_init(
+fn process_elligator(
     compute_buffer_info: &AccountInfo,
     offset: u32,
+    step: u8,
 ) -> ProgramResult {
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
@@ -740,36 +696,8 @@ fn process_elligator_init(
 
     let i = &constants::SQRT_M1;
     let d = &constants::EDWARDS_D;
-    let one_minus_d_sq = &constants::ONE_MINUS_EDWARDS_D_SQUARED;
-    let c = constants::MINUS_ONE;
-
-    let one = FieldElement::one();
-
-    let r_0 = read_field_element(&compute_buffer_data, offset)?;
-    let r = i * &r_0.square();
-    let N_s = &(&r + &one) * &one_minus_d_sq;
-    let D = &(&c - &(d * &r)) * &(&r + d);
-
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(
-        &FieldElement::sqrt_ratio_i_pow_p58_input(&N_s, &D).to_bytes(),
-    );
-
-    Ok(())
-}
-
-fn process_elligator_fini(
-    compute_buffer_info: &AccountInfo,
-    offset: u32,
-) -> ProgramResult {
-    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-
-    let offset = offset as usize;
-
-    let i = &constants::SQRT_M1;
-    let d = &constants::EDWARDS_D;
-    let one_minus_d_sq = &constants::ONE_MINUS_EDWARDS_D_SQUARED;
     let d_minus_one_sq = &constants::EDWARDS_D_MINUS_ONE_SQUARED;
+    let one_minus_d_sq = &constants::ONE_MINUS_EDWARDS_D_SQUARED;
     let mut c = constants::MINUS_ONE;
 
     let one = FieldElement::one();
@@ -778,6 +706,14 @@ fn process_elligator_fini(
     let r = i * &r_0.square();
     let N_s = &(&r + &one) * &one_minus_d_sq;
     let D = &(&c - &(d * &r)) * &(&r + d);
+
+    if step == 0 {
+        let offset = offset + 32;
+        compute_buffer_data[offset..offset+32].copy_from_slice(
+            &FieldElement::sqrt_ratio_i_pow_p58_input(&N_s, &D).to_bytes(),
+        );
+        return Ok(());
+    }
 
     let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let (Ns_D_is_sq, mut s) = FieldElement::sqrt_ratio_i_pow_p58_output(&N_s, &D, &pow_p22501_output);
@@ -805,39 +741,30 @@ fn process_elligator_fini(
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.0.to_bytes());
 
-
     Ok(())
 }
 
-fn process_montgomery_elligator_init(
+fn process_montgomery_elligator(
     compute_buffer_info: &AccountInfo,
     offset: u32,
+    step: u8,
 ) -> ProgramResult {
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
 
     let one = FieldElement::one();
-    let r_0 = read_field_element(&compute_buffer_data, offset)?;
-    let d_1 = &one + &r_0.square2(); /* 2r^2 */
 
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(
-        &d_1.to_bytes()
-    );
+    if step == 0 {
+        let r_0 = read_field_element(&compute_buffer_data, offset)?;
+        let d_1 = &one + &r_0.square2(); /* 2r^2 */
 
-    Ok(())
-}
-
-fn process_montgomery_elligator_midi(
-    compute_buffer_info: &AccountInfo,
-    offset: u32,
-) -> ProgramResult {
-    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-
-    let offset = offset as usize;
-
-    let one = FieldElement::one();
+        let offset = offset + 32;
+        compute_buffer_data[offset..offset+32].copy_from_slice(
+            &d_1.to_bytes()
+        );
+        return Ok(());
+    }
 
     let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
     let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
@@ -851,35 +778,13 @@ fn process_montgomery_elligator_midi(
     let inner = &(d_sq + &au) + &one;
     let eps = &d * &inner; /* eps = d^3 + Ad^2 + d */
 
-    let offset = offset + 32 * 6;
-    compute_buffer_data[offset..offset+32].copy_from_slice(
-        &FieldElement::sqrt_ratio_i_pow_p58_input(&eps, &one).to_bytes(),
-    );
-
-    Ok(())
-}
-
-fn process_montgomery_elligator_fini(
-    compute_buffer_info: &AccountInfo,
-    offset: u32,
-) -> ProgramResult {
-    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-
-    let offset = offset as usize;
-
-    let one = FieldElement::one();
-
-    let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
-    let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
-    let d_1_inv = &t19.pow2k(5) * &t3;
-
-    let d = &constants::MONTGOMERY_A_NEG * &d_1_inv; /* A/(1+2r^2) */
-
-    let d_sq = &d.square();
-    let au = &constants::MONTGOMERY_A * &d;
-
-    let inner = &(d_sq + &au) + &one;
-    let eps = &d * &inner; /* eps = d^3 + Ad^2 + d */
+    if step == 1 {
+        let offset = offset + 32 * 6;
+        compute_buffer_data[offset..offset+32].copy_from_slice(
+            &FieldElement::sqrt_ratio_i_pow_p58_input(&eps, &one).to_bytes(),
+        );
+        return Ok(());
+    }
 
     let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 10)?;
     let (eps_is_sq, _eps) = FieldElement::sqrt_ratio_i_pow_p58_output(&eps, &one, &pow_p22501_output);
@@ -900,33 +805,11 @@ fn process_montgomery_elligator_fini(
     Ok(())
 }
 
-fn process_montgomery_to_edwards_init(
-    compute_buffer_info: &AccountInfo,
-    offset: u32,
-) -> ProgramResult {
-    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
-
-    let offset = offset as usize;
-
-    let u = read_field_element(&compute_buffer_data, offset)?;
-    if u == FieldElement::minus_one() {
-        return Err(ProgramError::InvalidArgument);
-    }
-
-    let one = FieldElement::one();
-
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(
-        &(&u + &one).to_bytes()
-    );
-
-    Ok(())
-}
-
-fn process_montgomery_to_edwards_midi(
+fn process_montgomery_to_edwards(
     compute_buffer_info: &AccountInfo,
     offset: u32,
     sign_offset: u32,
+    step: u8,
 ) -> ProgramResult {
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
@@ -938,6 +821,14 @@ fn process_montgomery_to_edwards_midi(
     }
 
     let one = FieldElement::one();
+
+    if step == 0 {
+        let offset = offset + 32;
+        compute_buffer_data[offset..offset+32].copy_from_slice(
+            &(&u + &one).to_bytes()
+        );
+        return Ok(());
+    }
 
     let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
     let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
