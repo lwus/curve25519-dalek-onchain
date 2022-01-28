@@ -88,6 +88,9 @@ pub enum DSLInstruction {
     BuildLookupTable(BuildLookupTableData),
     MultiscalarMul(MultiscalarMulData),
 
+    DecompressEdwardsInit(RunDecompressData),
+    DecompressEdwardsFini(RunDecompressData),
+
     ElligatorInit(RunDecompressData),
     ElligatorFini(RunDecompressData),
 }

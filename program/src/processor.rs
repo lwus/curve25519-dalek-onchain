@@ -239,6 +239,21 @@ fn process_dsl_instruction(
             )
         }
 
+        DSLInstruction::DecompressEdwardsInit(RunDecompressData{ offset }) => {
+            msg!("DecompressEdwardsInit");
+            process_decompress_edwards_init(
+                compute_buffer_info,
+                offset,
+            )
+        }
+        DSLInstruction::DecompressEdwardsFini(RunDecompressData{ offset }) => {
+            msg!("DecompressEdwardsFini");
+            process_decompress_edwards_fini(
+                compute_buffer_info,
+                offset,
+            )
+        }
+
         DSLInstruction::ElligatorInit(RunDecompressData{ offset }) => {
             msg!("ElligatorInit");
             process_elligator_init(
@@ -647,6 +662,87 @@ fn process_decompress_fini(
     let offset = offset + 32;
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.0.to_bytes());
+
+    Ok(())
+}
+
+fn process_decompress_edwards_init(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+    let Y = FieldElement::from_bytes(
+        &compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?
+    );
+    let Z = FieldElement::one();
+    let YY = Y.square();
+    let u = &YY - &Z;                            // u =  y²-1
+    let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
+
+    // prep for pow25501
+    let v3 = &v.square()  * &v;
+    let v7 = &v3.square() * &v;
+
+    let pow_p22501_input = &u * &v7;
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+
+    Ok(())
+}
+
+fn process_decompress_edwards_fini(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+    let compressed_bytes = &compute_buffer_data[offset..offset+32];
+    let Y = FieldElement::from_bytes(
+        compressed_bytes
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?
+    );
+    let Z = FieldElement::one();
+    let YY = Y.square();
+    let u = &YY - &Z;                            // u =  y²-1
+    let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
+
+    let offset = offset + 32 * 5;
+    let (is_valid_y_coord, mut X) = {
+        let v3 = &v.square()  * &v;
+        let v7 = &v3.square() * &v;
+
+        let pow_p22501_input = &u * &v7;
+
+        let pow_p22501_output = FieldElement::from_bytes(
+            compute_buffer_data[offset..offset+32]
+                .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+        );
+
+        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
+
+        let r = &(&u * &v3) * &pow_p58_output;
+
+        FieldElement::sqrt_ratio_i(&u, &v, &r)
+    };
+
+    if is_valid_y_coord.unwrap_u8() != 1u8 {
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    use subtle::{Choice, ConditionallyNegatable};
+    let compressed_sign_bit = Choice::from(compressed_bytes[31] >> 7);
+    X.conditional_negate(compressed_sign_bit);
+
+    let res = EdwardsPoint{ X, Y, Z, T: &X * &Y };
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+128].copy_from_slice(
+        &res.to_bytes());
 
     Ok(())
 }
