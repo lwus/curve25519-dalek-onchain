@@ -557,18 +557,12 @@ fn process_invsqrt_init(
     let offset = offset as usize;
 
     let u = FieldElement::one();
-    let v = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let v3 = &v.square()  * &v;
-    let v7 = &v3.square() * &v;
-
-    let pow_p22501_input = &u * &v7;
+    let v = read_field_element(&compute_buffer_data, offset)?;
 
     let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &FieldElement::sqrt_ratio_i_pow_p58_input(&u, &v).to_bytes(),
+    );
 
     Ok(())
 }
@@ -582,33 +576,16 @@ fn process_invsqrt_fini(
     let offset = offset as usize;
 
     let u = FieldElement::one();
-    let v = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
+    let v = read_field_element(&compute_buffer_data, offset)?;
+    let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
 
-    let v3 = &v.square()  * &v;
-    let v7 = &v3.square() * &v;
-
-    let pow_p22501_input = &u * &v7;
-
-    let offset = offset + 32 * 5;
-    let pow_p22501_output = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
-
-    let r = &(&u * &v3) * &pow_p58_output;
-
-    let (ok, r) = FieldElement::sqrt_ratio_i(&u, &v, &r);
+    let (ok, r) = FieldElement::sqrt_ratio_i_pow_p58_output(&u, &v, &pow_p22501_output);
 
     if ok.unwrap_u8() == 0u8 {
         return Err(ProgramError::InvalidArgument);
     }
 
-    let offset = offset + 32;
+    let offset = offset + 32 * 6;
     compute_buffer_data[offset..offset+32].copy_from_slice(&r.to_bytes());
 
     Ok(())
@@ -621,10 +598,7 @@ fn process_pow22501_p1(
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
-    let element = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
+    let element = read_field_element(&compute_buffer_data, offset)?;
 
     let (t17, t13, t3) = FieldElement::pow22001(&element);
 
@@ -647,21 +621,12 @@ fn process_pow22501_p2(
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
-    let t17 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let offset = offset + 32;
-    let t13 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
+    let t17 = read_field_element(&compute_buffer_data, offset)?;
+    let t13 = read_field_element(&compute_buffer_data, offset + 32)?;
 
     let t19 = FieldElement::pow22501(&t17, &t13);
 
-    let offset = offset + 32; // skip t3
-    let offset = offset + 32;
+    let offset = offset + 32 * 3; // skip t3
     compute_buffer_data[offset..offset+32].copy_from_slice(&t19.to_bytes());
 
     Ok(())
@@ -698,10 +663,7 @@ fn process_decompress_fini(
     );
 
     let offset = offset + 32 * 7;
-    let element = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
+    let element = read_field_element(&compute_buffer_data, offset)?;
 
     let res = point.decompress_fini(&element).ok_or(ProgramError::InvalidArgument)?;
 
@@ -719,23 +681,16 @@ fn process_decompress_edwards_init(
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
-    let Y = FieldElement::from_bytes(
-        &compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?
-    );
+    let Y = read_field_element(&compute_buffer_data, offset)?;
     let Z = FieldElement::one();
     let YY = Y.square();
     let u = &YY - &Z;                            // u =  y²-1
     let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
 
-    // prep for pow25501
-    let v3 = &v.square()  * &v;
-    let v7 = &v3.square() * &v;
-
-    let pow_p22501_input = &u * &v7;
-
     let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &FieldElement::sqrt_ratio_i_pow_p58_input(&u, &v).to_bytes(),
+    );
 
     Ok(())
 }
@@ -748,33 +703,14 @@ fn process_decompress_edwards_fini(
 
     let offset = offset as usize;
     let compressed_bytes = &compute_buffer_data[offset..offset+32];
-    let Y = FieldElement::from_bytes(
-        compressed_bytes
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?
-    );
+    let Y = read_field_element(&compute_buffer_data, offset)?;
     let Z = FieldElement::one();
     let YY = Y.square();
     let u = &YY - &Z;                            // u =  y²-1
     let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
 
-    let offset = offset + 32 * 5;
-    let (is_valid_y_coord, mut X) = {
-        let v3 = &v.square()  * &v;
-        let v7 = &v3.square() * &v;
-
-        let pow_p22501_input = &u * &v7;
-
-        let pow_p22501_output = FieldElement::from_bytes(
-            compute_buffer_data[offset..offset+32]
-                .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-        );
-
-        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
-
-        let r = &(&u * &v3) * &pow_p58_output;
-
-        FieldElement::sqrt_ratio_i(&u, &v, &r)
-    };
+    let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
+    let (is_valid_y_coord, mut X) = FieldElement::sqrt_ratio_i_pow_p58_output(&u, &v, &pow_p22501_output);
 
     if is_valid_y_coord.unwrap_u8() != 1u8 {
         msg!("Invalid y coordinate");
@@ -787,7 +723,7 @@ fn process_decompress_edwards_fini(
 
     let res = EdwardsPoint{ X, Y, Z, T: &X * &Y };
 
-    let offset = offset + 32;
+    let offset = offset + 32 * 6;
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.to_bytes());
 
@@ -809,26 +745,15 @@ fn process_elligator_init(
 
     let one = FieldElement::one();
 
-    let r_0 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let r_0 = read_field_element(&compute_buffer_data, offset)?;
     let r = i * &r_0.square();
     let N_s = &(&r + &one) * &one_minus_d_sq;
     let D = &(&c - &(d * &r)) * &(&r + d);
 
-    // renaming for prep for pow25501
-    let u = N_s;
-    let v = D;
-
-    let v3 = &v.square()  * &v;
-    let v7 = &v3.square() * &v;
-
-    let pow_p22501_input = &u * &v7;
-
     let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &FieldElement::sqrt_ratio_i_pow_p58_input(&N_s, &D).to_bytes(),
+    );
 
     Ok(())
 }
@@ -849,37 +774,13 @@ fn process_elligator_fini(
 
     let one = FieldElement::one();
 
-    let r_0 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let r_0 = read_field_element(&compute_buffer_data, offset)?;
     let r = i * &r_0.square();
     let N_s = &(&r + &one) * &one_minus_d_sq;
     let D = &(&c - &(d * &r)) * &(&r + d);
 
-    let offset = offset + 32 * 5;
-    let (Ns_D_is_sq, mut s) = {
-        // renaming for prep for pow25501
-        let u = N_s;
-        let v = D;
-
-        let v3 = &v.square()  * &v;
-        let v7 = &v3.square() * &v;
-
-        let pow_p22501_input = &u * &v7;
-
-        let pow_p22501_output = FieldElement::from_bytes(
-            compute_buffer_data[offset..offset+32]
-                .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-        );
-
-        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
-
-        let r = &(&u * &v3) * &pow_p58_output;
-
-        FieldElement::sqrt_ratio_i(&u, &v, &r)
-    };
+    let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
+    let (Ns_D_is_sq, mut s) = FieldElement::sqrt_ratio_i_pow_p58_output(&N_s, &D, &pow_p22501_output);
 
     use subtle::{ConditionallySelectable, ConditionallyNegatable};
     let mut s_prime = &s * &r_0;
@@ -900,7 +801,7 @@ fn process_elligator_fini(
         T: &FieldElement::one() + &s_sq,
     }.to_extended());
 
-    let offset = offset + 32;
+    let offset = offset + 32 * 6;
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.0.to_bytes());
 
@@ -917,11 +818,7 @@ fn process_montgomery_elligator_init(
     let offset = offset as usize;
 
     let one = FieldElement::one();
-    let r_0 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let r_0 = read_field_element(&compute_buffer_data, offset)?;
     let d_1 = &one + &r_0.square2(); /* 2r^2 */
 
     let offset = offset + 32;
@@ -942,18 +839,8 @@ fn process_montgomery_elligator_midi(
 
     let one = FieldElement::one();
 
-    let offset = offset + 32 * 4;
-    let t3 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let offset = offset + 32;
-    let t19 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
+    let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let d_1_inv = &t19.pow2k(5) * &t3;
 
     let d = &constants::MONTGOMERY_A_NEG * &d_1_inv; /* A/(1+2r^2) */
@@ -964,17 +851,10 @@ fn process_montgomery_elligator_midi(
     let inner = &(d_sq + &au) + &one;
     let eps = &d * &inner; /* eps = d^3 + Ad^2 + d */
 
-    // renaming for prep for pow25501
-    let u = eps;
-    let v = one;
-
-    let v3 = &v.square()  * &v;
-    let v7 = &v3.square() * &v;
-
-    let pow_p22501_input = &u * &v7;
-
-    let offset = offset + 32;
-    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+    let offset = offset + 32 * 6;
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &FieldElement::sqrt_ratio_i_pow_p58_input(&eps, &one).to_bytes(),
+    );
 
     Ok(())
 }
@@ -989,18 +869,8 @@ fn process_montgomery_elligator_fini(
 
     let one = FieldElement::one();
 
-    let offset = offset + 32 * 4;
-    let t3 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let offset = offset + 32;
-    let t19 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
+    let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let d_1_inv = &t19.pow2k(5) * &t3;
 
     let d = &constants::MONTGOMERY_A_NEG * &d_1_inv; /* A/(1+2r^2) */
@@ -1011,28 +881,8 @@ fn process_montgomery_elligator_fini(
     let inner = &(d_sq + &au) + &one;
     let eps = &d * &inner; /* eps = d^3 + Ad^2 + d */
 
-    let offset = offset + 32 * 5;
-    let (eps_is_sq, _eps) = {
-        // renaming for prep for pow25501
-        let u = eps;
-        let v = one;
-
-        let v3 = &v.square()  * &v;
-        let v7 = &v3.square() * &v;
-
-        let pow_p22501_input = &u * &v7;
-
-        let pow_p22501_output = FieldElement::from_bytes(
-            compute_buffer_data[offset..offset+32]
-                .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-        );
-
-        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
-
-        let r = &(&u * &v3) * &pow_p58_output;
-
-        FieldElement::sqrt_ratio_i(&u, &v, &r)
-    };
+    let pow_p22501_output = read_field_element(&compute_buffer_data, offset + 32 * 10)?;
+    let (eps_is_sq, _eps) = FieldElement::sqrt_ratio_i_pow_p58_output(&eps, &one, &pow_p22501_output);
 
     use subtle::{ConditionallySelectable, ConditionallyNegatable};
 
@@ -1043,7 +893,7 @@ fn process_montgomery_elligator_fini(
     u.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
 
     // write the compressed MontgomeryPoint
-    let offset = offset + 32;
+    let offset = offset + 32 * 11;
     compute_buffer_data[offset..offset+32].copy_from_slice(
         &u.to_bytes());
 
@@ -1058,11 +908,7 @@ fn process_montgomery_to_edwards_init(
 
     let offset = offset as usize;
 
-    let u = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let u = read_field_element(&compute_buffer_data, offset)?;
     if u == FieldElement::minus_one() {
         return Err(ProgramError::InvalidArgument);
     }
@@ -1086,29 +932,15 @@ fn process_montgomery_to_edwards_midi(
 
     let offset = offset as usize;
 
-    let u = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let u = read_field_element(&compute_buffer_data, offset)?;
     if u == FieldElement::minus_one() {
         return Err(ProgramError::InvalidArgument);
     }
 
     let one = FieldElement::one();
 
-    let offset = offset + 32 * 4;
-    let t3 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
-    let offset = offset + 32;
-    let t19 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
-
+    let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
+    let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let up1_inv = &t19.pow2k(5) * &t3;
 
     let y = &(&u - &one) * &up1_inv;
@@ -1118,7 +950,7 @@ fn process_montgomery_to_edwards_midi(
     let mut y_bytes = y.to_bytes();
     y_bytes[31] ^= sign << 7;
 
-    let offset = offset + 32;
+    let offset = offset + 32 * 6;
     compute_buffer_data[offset..offset+32].copy_from_slice(&y_bytes);
 
     Ok(())
@@ -1224,4 +1056,14 @@ fn process_multiscalar_mul(
         &Q.to_bytes());
 
     Ok(())
+}
+
+fn read_field_element(
+    compute_buffer_data: &[u8],
+    offset: usize,
+) -> Result<FieldElement, ProgramError> {
+    Ok(FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    ))
 }

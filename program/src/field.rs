@@ -122,6 +122,33 @@ impl FieldElement {
         t21
     }
 
+    pub fn sqrt_ratio_i_pow_p58_input(
+        u: &FieldElement,
+        v: &FieldElement,
+    ) -> FieldElement {
+        let v3 = &v.square()  * &v;
+        let v7 = &v3.square() * &v;
+
+        u * &v7
+    }
+
+    pub fn sqrt_ratio_i_pow_p58_output(
+        u: &FieldElement,
+        v: &FieldElement,
+        pow_p22501_output: &FieldElement,
+    ) -> (Choice, FieldElement) {
+        let v3 = &v.square()  * &v;
+        let v7 = &v3.square() * &v;
+
+        let pow_p22501_input = u * &v7;
+
+        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, pow_p22501_output);
+
+        let r = &(u * &v3) * &pow_p58_output;
+
+        FieldElement::sqrt_ratio_i(u, v, &r)
+    }
+
     /// Given `FieldElements` `u` and `v`, compute either `sqrt(u/v)`
     /// or `sqrt(i*u/v)` in constant time.
     ///
