@@ -451,22 +451,11 @@ pub fn transer_proof_instructions(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn elligator_to_curve_instructions() -> Vec<u8> {
-    // compute buffer is laid out as
-    // [
-    //   ..header..,
-    //   ..result_space..,
-    //   ..scratch_space..,
-    // ]
-    let result_space_size = 32 * 4;
-    let scratch_space = HEADER_SIZE + result_space_size;
-
-    let mut instructions = vec![];
-
-    let input_num = 0;
-    let input_offset = HEADER_SIZE + input_num * 32;
-    let scratch_space = scratch_space.try_into().unwrap();
-    instructions.extend_from_slice(&[
+pub fn elligator_to_curve_instructions(
+    input_offset: u32,
+    scratch_space: u32,
+) -> [DSLInstruction; 5] {
+    [
         DSLInstruction::CopyInput(CopyInputData{
             input_offset: input_offset.try_into().unwrap(),
             compute_offset: scratch_space,
@@ -486,28 +475,15 @@ pub fn elligator_to_curve_instructions() -> Vec<u8> {
             offset: scratch_space,
             step: 1,
         }),
-    ]);
-
-    dsl_instructions_to_bytes(&instructions)
+    ]
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
-    // compute buffer is laid out as
-    // [
-    //   ..header..,
-    //   ..result_space..,
-    //   ..scratch_space..,
-    // ]
-    let result_space_size = 32 * 4;
-    let scratch_space = HEADER_SIZE + result_space_size;
-
-    let mut instructions = vec![];
-
-    let input_num = 0;
-    let input_offset = HEADER_SIZE + input_num * 32;
-    let scratch_space = scratch_space.try_into().unwrap();
-    instructions.extend_from_slice(&[
+pub fn edwards_elligator_to_curve_instructions(
+    input_offset: u32,
+    scratch_space: u32,
+) -> [DSLInstruction; 17] {
+    [
         DSLInstruction::CopyInput(CopyInputData{
             input_offset: input_offset.try_into().unwrap(),
             compute_offset: scratch_space,
@@ -574,28 +550,15 @@ pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
         DSLInstruction::InPlaceMulByCofactor(RunDecompressData{
             offset: scratch_space + 32 * 23,
         }),
-    ]);
-
-    dsl_instructions_to_bytes(&instructions)
+    ]
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn decompress_edwards_instructions() -> Vec<u8> {
-    // compute buffer is laid out as
-    // [
-    //   ..header..,
-    //   ..result_space..,
-    //   ..scratch_space..,
-    // ]
-    let result_space_size = 32 * 4;
-    let scratch_space = HEADER_SIZE + result_space_size;
-
-    let mut instructions = vec![];
-
-    let input_num = 0;
-    let input_offset = HEADER_SIZE + input_num * 32;
-    let scratch_space = scratch_space.try_into().unwrap();
-    instructions.extend_from_slice(&[
+pub fn decompress_edwards_instructions(
+    input_offset: u32,
+    scratch_space: u32,
+) -> [DSLInstruction; 5] {
+    [
         DSLInstruction::CopyInput(CopyInputData{
             input_offset: input_offset.try_into().unwrap(),
             compute_offset: scratch_space,
@@ -615,28 +578,15 @@ pub fn decompress_edwards_instructions() -> Vec<u8> {
             offset: scratch_space,
             step: 1,
         }),
-    ]);
-
-    dsl_instructions_to_bytes(&instructions)
+    ]
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn compress_edwards_instructions() -> Vec<u8> {
-    // compute buffer is laid out as
-    // [
-    //   ..header..,
-    //   ..result_space..,
-    //   ..scratch_space..,
-    // ]
-    let result_space_size = 32 * 4;
-    let scratch_space = HEADER_SIZE + result_space_size;
-
-    let mut instructions = vec![];
-
-    let input_num = 0;
-    let input_offset = HEADER_SIZE + input_num * 32;
-    let scratch_space = scratch_space.try_into().unwrap();
-    instructions.extend_from_slice(&[
+pub fn compress_edwards_instructions(
+    input_offset: u32,
+    scratch_space: u32,
+) -> [DSLInstruction; 5] {
+    [
         DSLInstruction::CopyInput(CopyInputData{
             input_offset: input_offset.try_into().unwrap(),
             compute_offset: scratch_space,
@@ -656,13 +606,11 @@ pub fn compress_edwards_instructions() -> Vec<u8> {
             offset: scratch_space,
             step: 1,
         }),
-    ]);
-
-    dsl_instructions_to_bytes(&instructions)
+    ]
 }
 
 #[cfg(not(target_arch = "bpf"))]
-fn dsl_instructions_to_bytes(
+pub fn dsl_instructions_to_bytes(
     instructions: &[DSLInstruction]
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(INSTRUCTION_SIZE * instructions.len());

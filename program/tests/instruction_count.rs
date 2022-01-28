@@ -298,7 +298,9 @@ async fn test_elligator() {
         0, 1, 2, 3, 4, 5, 6, 7,
     ];
 
-    let dsl = instruction::elligator_to_curve_instructions();
+    let offset = instruction::HEADER_SIZE.try_into().unwrap();
+    let dsl = instruction::dsl_instructions_to_bytes(
+        &instruction::elligator_to_curve_instructions(offset, offset + 32 * 4));
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + 32;
@@ -387,7 +389,9 @@ async fn test_edwards_elligator() {
         0, 1, 2, 3, 4, 5, 6, 7,
     ];
 
-    let dsl = instruction::edwards_elligator_to_curve_instructions();
+    let offset = instruction::HEADER_SIZE.try_into().unwrap();
+    let dsl = instruction::dsl_instructions_to_bytes(
+        &instruction::edwards_elligator_to_curve_instructions(offset, offset + 32 * 4));
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + 32;
@@ -524,7 +528,9 @@ async fn test_edwards_decompress() {
         47, 227, 131, 187,  95, 229,  66,  50
     ];
 
-    let dsl = instruction::decompress_edwards_instructions();
+    let offset = instruction::HEADER_SIZE.try_into().unwrap();
+    let dsl = instruction::dsl_instructions_to_bytes(
+        &instruction::decompress_edwards_instructions(offset, offset + 32 * 4));
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + 32;
@@ -619,7 +625,9 @@ async fn test_edwards_compress() {
     decompressed_bytes[64..96].copy_from_slice(&decompressed.Z.to_bytes());
     decompressed_bytes[96..  ].copy_from_slice(&decompressed.T.to_bytes());
 
-    let dsl = instruction::compress_edwards_instructions();
+    let offset = instruction::HEADER_SIZE.try_into().unwrap();
+    let dsl = instruction::dsl_instructions_to_bytes(
+        &instruction::compress_edwards_instructions(offset, offset + 32 * 4));
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + 128;
