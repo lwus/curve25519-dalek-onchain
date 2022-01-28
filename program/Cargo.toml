@@ -34,8 +34,9 @@ zeroize = { version = "1", default-features = false }
 rand_core = { version = "0.6.3", default-features = false }
 
 [dev-dependencies]
-solana-program-test = "1.9.4"
-solana-sdk = { version = "1.9.4", default-features = false }
+curve25519-dalek = { path = "/Users/lwu/code/solana/curve25519-dalek", features = ["serde"] }
 proptest = "0.10"
 rand = "0.7"
-curve25519-dalek = { git = "https://github.com/lwus/curve25519-dalek", features = ["serde"] }
+sha2 = "0.9"
+solana-program-test = "1.9.4"
+solana-sdk = { version = "1.9.4", default-features = false }

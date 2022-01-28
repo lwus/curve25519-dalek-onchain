@@ -269,6 +269,28 @@ fn process_dsl_instruction(
             )
         }
 
+        DSLInstruction::EdwardsElligatorInit(RunDecompressData{ offset }) => {
+            msg!("EdwardsElligatorInit");
+            process_edwards_elligator_init(
+                compute_buffer_info,
+                offset,
+            )
+        }
+        DSLInstruction::EdwardsElligatorMidi(RunDecompressData{ offset }) => {
+            msg!("EdwardsElligatorMidi");
+            process_edwards_elligator_midi(
+                compute_buffer_info,
+                offset,
+            )
+        }
+        DSLInstruction::EdwardsElligatorFini(RunDecompressData{ offset }) => {
+            msg!("EdwardsElligatorFini");
+            process_edwards_elligator_fini(
+                compute_buffer_info,
+                offset,
+            )
+        }
+
         DSLInstruction::BuildLookupTable(data) => {
             msg!("BuildLookupTable");
             process_build_lookup_table(
@@ -857,6 +879,156 @@ fn process_elligator_fini(
     compute_buffer_data[offset..offset+128].copy_from_slice(
         &res.0.to_bytes());
 
+
+    Ok(())
+}
+
+fn process_edwards_elligator_init(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let one = FieldElement::one();
+    let r_0 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let d_1 = &one + &r_0.square2(); /* 2r^2 */
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &d_1.to_bytes()
+    );
+
+    Ok(())
+}
+
+fn process_edwards_elligator_midi(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let one = FieldElement::one();
+    let r_0 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let offset = offset + 32 * 4;
+    let t3 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let offset = offset + 32;
+    let t19 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let d_1_inv = &t19.pow2k(5) * &t3;
+
+    let d = &constants::MONTGOMERY_A_NEG * &d_1_inv; /* A/(1+2r^2) */
+
+    let d_sq = &d.square();
+    let au = &constants::MONTGOMERY_A * &d;
+
+    let inner = &(d_sq + &au) + &one;
+    let eps = &d * &inner; /* eps = d^3 + Ad^2 + d */
+
+    // renaming for prep for pow25501
+    let u = eps;
+    let v = one;
+
+    let v3 = &v.square()  * &v;
+    let v7 = &v3.square() * &v;
+
+    let pow_p22501_input = &u * &v7;
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&pow_p22501_input.to_bytes());
+
+    Ok(())
+}
+
+fn process_edwards_elligator_fini(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let one = FieldElement::one();
+    let r_0 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let offset = offset + 32 * 4;
+    let t3 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let offset = offset + 32;
+    let t19 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let d_1_inv = &t19.pow2k(5) * &t3;
+
+    let d = &constants::MONTGOMERY_A_NEG * &d_1_inv; /* A/(1+2r^2) */
+
+    let d_sq = &d.square();
+    let au = &constants::MONTGOMERY_A * &d;
+
+    let inner = &(d_sq + &au) + &one;
+    let eps = &d * &inner; /* eps = d^3 + Ad^2 + d */
+
+    let offset = offset + 32 * 5;
+    let (eps_is_sq, _eps) = {
+        // renaming for prep for pow25501
+        let u = eps;
+        let v = one;
+
+        let v3 = &v.square()  * &v;
+        let v7 = &v3.square() * &v;
+
+        let pow_p22501_input = &u * &v7;
+
+        let pow_p22501_output = FieldElement::from_bytes(
+            compute_buffer_data[offset..offset+32]
+                .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+        );
+
+        let pow_p58_output = FieldElement::pow_p58(&pow_p22501_input, &pow_p22501_output);
+
+        let r = &(&u * &v3) * &pow_p58_output;
+
+        FieldElement::sqrt_ratio_i(&u, &v, &r)
+    };
+
+    use subtle::{ConditionallySelectable, ConditionallyNegatable};
+
+    let zero = FieldElement::zero();
+    let Atemp = FieldElement::conditional_select(&constants::MONTGOMERY_A, &zero, eps_is_sq); /* 0, or A if nonsquare*/
+
+    let mut u = &d + &Atemp; /* d, or d+A if nonsquare */
+    u.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
+
+    // write the compressed MontgomeryPoint
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &u.to_bytes());
 
     Ok(())
 }

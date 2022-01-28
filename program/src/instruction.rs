@@ -93,6 +93,10 @@ pub enum DSLInstruction {
 
     ElligatorInit(RunDecompressData),
     ElligatorFini(RunDecompressData),
+
+    EdwardsElligatorInit(RunDecompressData),
+    EdwardsElligatorMidi(RunDecompressData),
+    EdwardsElligatorFini(RunDecompressData),
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
@@ -466,6 +470,54 @@ pub fn elligator_to_curve_instructions() -> Vec<u8> {
             offset: scratch_space + 64,
         }),
         DSLInstruction::ElligatorFini(RunDecompressData{
+            offset: scratch_space,
+        }),
+    ]);
+
+    dsl_instructions_to_bytes(&instructions)
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn edwards_elligator_to_curve_instructions() -> Vec<u8> {
+    // compute buffer is laid out as
+    // [
+    //   ..header..,
+    //   ..result_space..,
+    //   ..scratch_space..,
+    // ]
+    let result_space_size = 32 * 4;
+    let scratch_space = HEADER_SIZE + result_space_size;
+
+    let mut instructions = vec![];
+
+    let input_num = 0;
+    let input_offset = HEADER_SIZE + input_num * 32;
+    let scratch_space = scratch_space.try_into().unwrap();
+    instructions.extend_from_slice(&[
+        DSLInstruction::CopyInput(CopyInputData{
+            input_offset: input_offset.try_into().unwrap(),
+            compute_offset: scratch_space,
+            bytes: 32,
+        }),
+        DSLInstruction::EdwardsElligatorInit(RunDecompressData{
+            offset: scratch_space,
+        }),
+        DSLInstruction::Pow22501P1(RunDecompressData{
+            offset: scratch_space + 32,
+        }),
+        DSLInstruction::Pow22501P2(RunDecompressData{
+            offset: scratch_space + 32 * 2,
+        }),
+        DSLInstruction::EdwardsElligatorMidi(RunDecompressData{
+            offset: scratch_space,
+        }),
+        DSLInstruction::Pow22501P1(RunDecompressData{
+            offset: scratch_space + 32 * 6,
+        }),
+        DSLInstruction::Pow22501P2(RunDecompressData{
+            offset: scratch_space + 32 * 7,
+        }),
+        DSLInstruction::EdwardsElligatorFini(RunDecompressData{
             offset: scratch_space,
         }),
     ]);

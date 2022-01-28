@@ -565,6 +565,18 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek"
 version = "3.2.0"
+dependencies = [
+ "byteorder",
+ "digest 0.9.0",
+ "rand_core 0.6.3",
+ "serde",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b9fdf9972b2bd6af2d913799d9ebc165ea4d2e65878e329d9c6b372c4491b61"
 dependencies = [
@@ -576,32 +588,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "curve25519-dalek"
-version = "3.2.0"
-source = "git+https://github.com/lwus/curve25519-dalek#acde86eb4327f67f6b14a85f91863394fdaa0260"
-dependencies = [
- "byteorder",
- "digest 0.9.0",
- "rand_core 0.6.3",
- "serde",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "curve25519-dalek-onchain"
 version = "0.0.1"
 dependencies = [
  "borsh",
  "bytemuck",
  "byteorder",
- "curve25519-dalek 3.2.0 (git+https://github.com/lwus/curve25519-dalek)",
+ "curve25519-dalek 3.2.0",
  "digest 0.9.0",
  "num-derive",
  "num-traits",
  "proptest",
  "rand 0.7.3",
  "rand_core 0.6.3",
+ "sha2",
  "solana-program",
  "solana-program-test",
  "solana-sdk",

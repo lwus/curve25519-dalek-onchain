@@ -16,6 +16,7 @@ use {
         instruction,
         processor::process_instruction,
     },
+    sha2::{Digest, Sha512},
     std::convert::TryInto,
 };
 
@@ -367,6 +368,124 @@ async fn test_elligator() {
         curve25519_dalek::ristretto::RistrettoPoint::elligator_ristretto_flavor(
             &curve25519_dalek::field::FieldElement::from_bytes(&hash_bytes),
         ).0,
+    );
+}
+
+#[tokio::test]
+async fn test_edwards_elligator() {
+    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
+
+    // pc.set_bpf_compute_max_units(350_000);
+
+    let (mut banks_client, payer, recent_blockhash) = pc.start().await;
+
+    let rent = banks_client.get_rent().await;
+    let rent = rent.unwrap();
+
+    let compute_buffer = Keypair::new();
+    let input_buffer = Keypair::new();
+    let instruction_buffer = Keypair::new();
+
+    // TODO
+    let input_bytes = [
+        0, 1, 2, 3, 4, 5, 6, 7,
+        0, 1, 2, 3, 4, 5, 6, 7,
+        0, 1, 2, 3, 4, 5, 6, 7,
+        0, 1, 2, 3, 4, 5, 6, 7,
+    ];
+
+    let dsl = instruction::edwards_elligator_to_curve_instructions();
+
+    let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
+    let input_buffer_len = instruction::HEADER_SIZE + 32;
+
+    // scratch + result space
+    let compute_buffer_len = instruction::HEADER_SIZE + 1000;
+
+    let mut instructions = vec![];
+    instructions.extend_from_slice(
+        &create_buffer_instructions(
+            &payer,
+            &rent,
+            &instruction_buffer,
+            instruction_buffer_len,
+            &input_buffer,
+            input_buffer_len,
+            &compute_buffer,
+            compute_buffer_len,
+        ),
+    );
+
+    write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
+
+    let mut hash = Sha512::new();
+    hash.update(input_bytes);
+    let h = hash.finalize();
+    let mut res = [0u8; 32];
+    res.copy_from_slice(&h[..32]);
+
+    let sign_bit = (res[31] & 0x80) >> 7;
+
+    let fe = curve25519_dalek::field::FieldElement::from_bytes(&res);
+
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::HEADER_SIZE as u32,
+            true,
+            &fe.to_bytes(),
+        ),
+    );
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer, &instruction_buffer, &input_buffer, &compute_buffer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+
+    instructions.clear();
+
+    instructions.push(
+        ComputeBudgetInstruction::request_units(800_000),
+    );
+    // crank baby
+    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
+    for _i in 0..num_cranks {
+        instructions.push(
+            instruction::crank_compute(
+                instruction_buffer.pubkey(),
+                input_buffer.pubkey(),
+                compute_buffer.pubkey(),
+            ),
+        );
+    }
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+
+    let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 11;
+    let edwards_elligator_result_bytes = &account.data[buffer_idx..32+buffer_idx];
+    let edwards_elligator_result = curve25519_dalek::montgomery::MontgomeryPoint(
+        edwards_elligator_result_bytes.try_into().unwrap(),
+    );
+
+    println!("F {:?}", &fe);
+    println!("Elligator {:x?}", edwards_elligator_result_bytes);
+
+    assert_eq!(
+        edwards_elligator_result,
+        curve25519_dalek::montgomery::elligator_encode(
+            &fe,
+        ),
     );
 }
 
