@@ -4,6 +4,7 @@ use {
     solana_program_test::*,
     solana_sdk::{
         compute_budget::ComputeBudgetInstruction,
+        hash::Hash,
         instruction::Instruction,
         signer::keypair::Keypair,
         signature::Signer,
@@ -101,6 +102,48 @@ fn write_dsl_instructions(
     }
 }
 
+async fn crank_dsl(
+    dsl: &[u8],
+    instructions_per_tx: u8,
+    payer: &dyn Signer,
+    banks_client: &mut BanksClient,
+    recent_blockhash: Hash,
+    instruction_buffer: &Keypair,
+    input_buffer: &Keypair,
+    compute_buffer: &Keypair,
+) {
+    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
+
+    let mut current = 0;
+    while current < num_cranks {
+        println!("cranking... {}", current);
+        let mut instructions = vec![
+            ComputeBudgetInstruction::request_units(1_000_000),
+            instruction::noop(current.try_into().unwrap()),
+        ];
+        for _j in 0..instructions_per_tx {
+            if current >= num_cranks {
+                break;
+            }
+            current += 1;
+            instructions.push(
+                instruction::crank_compute(
+                    instruction_buffer.pubkey(),
+                    input_buffer.pubkey(),
+                    compute_buffer.pubkey(),
+                ),
+            );
+        }
+
+        let mut transaction = Transaction::new_with_payer(
+            instructions.as_slice(),
+            Some(&payer.pubkey()),
+        );
+        transaction.sign(&[payer], recent_blockhash);
+        banks_client.process_transaction(transaction).await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn test_multiscalar_mul() {
     let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
@@ -189,41 +232,10 @@ async fn test_multiscalar_mul() {
     banks_client.process_transaction(transaction).await.unwrap();
 
 
-    // crank baby
-    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    let instructions_per_tx = 10; // empirical...
-
-    let mut current = 0;
-    while current < num_cranks {
-        println!("cranking... {}", current);
-        instructions.clear();
-        instructions.push(
-            ComputeBudgetInstruction::request_units(1_000_000),
-        );
-        instructions.push(
-            instruction::noop(current.try_into().unwrap())
-        );
-        for _j in 0..instructions_per_tx {
-            if current >= num_cranks {
-                break;
-            }
-            current += 1;
-            instructions.push(
-                instruction::crank_compute(
-                    instruction_buffer.pubkey(),
-                    input_buffer.pubkey(),
-                    compute_buffer.pubkey(),
-                ),
-            );
-        }
-
-        let mut transaction = Transaction::new_with_payer(
-            instructions.as_slice(),
-            Some(&payer.pubkey()),
-        );
-        transaction.sign(&[&payer], recent_blockhash);
-        banks_client.process_transaction(transaction).await.unwrap();
-    }
+    crank_dsl(
+        &dsl, 10, &payer, &mut banks_client, recent_blockhash,
+        &instruction_buffer, &input_buffer, &compute_buffer,
+    ).await;
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
 
@@ -328,29 +340,10 @@ async fn test_elligator() {
     banks_client.process_transaction(transaction).await.unwrap();
 
 
-    instructions.clear();
-
-    instructions.push(
-        ComputeBudgetInstruction::request_units(500_000),
-    );
-    // crank baby
-    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    for _i in 0..num_cranks {
-        instructions.push(
-            instruction::crank_compute(
-                instruction_buffer.pubkey(),
-                input_buffer.pubkey(),
-                compute_buffer.pubkey(),
-            ),
-        );
-    }
-
-    let mut transaction = Transaction::new_with_payer(
-        instructions.as_slice(),
-        Some(&payer.pubkey()),
-    );
-    transaction.sign(&[&payer], recent_blockhash);
-    banks_client.process_transaction(transaction).await.unwrap();
+    crank_dsl(
+        &dsl, 10, &payer, &mut banks_client, recent_blockhash,
+        &instruction_buffer, &input_buffer, &compute_buffer,
+    ).await;
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
 
@@ -444,36 +437,10 @@ async fn test_edwards_elligator() {
     banks_client.process_transaction(transaction).await.unwrap();
 
 
-    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    let mut crank_count = 0;
-    let iters = 2;
-    for iter in 0..iters {
-        instructions.clear();
-
-        instructions.push(instruction::noop(iter as u64));
-        instructions.push(
-            ComputeBudgetInstruction::request_units(1_000_000),
-        );
-        // crank baby
-        for _i in 0..(num_cranks + iters - 1) / iters {
-            if crank_count >= num_cranks { break; }
-            crank_count += 1;
-            instructions.push(
-                instruction::crank_compute(
-                    instruction_buffer.pubkey(),
-                    input_buffer.pubkey(),
-                    compute_buffer.pubkey(),
-                ),
-            );
-        }
-
-        let mut transaction = Transaction::new_with_payer(
-            instructions.as_slice(),
-            Some(&payer.pubkey()),
-        );
-        transaction.sign(&[&payer], recent_blockhash);
-        banks_client.process_transaction(transaction).await.unwrap();
-    }
+    crank_dsl(
+        &dsl, 10, &payer, &mut banks_client, recent_blockhash,
+        &instruction_buffer, &input_buffer, &compute_buffer,
+    ).await;
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
 
@@ -599,29 +566,10 @@ async fn test_edwards_decompress() {
     banks_client.process_transaction(transaction).await.unwrap();
 
 
-    instructions.clear();
-
-    instructions.push(
-        ComputeBudgetInstruction::request_units(500_000),
-    );
-    // crank baby
-    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    for _i in 0..num_cranks {
-        instructions.push(
-            instruction::crank_compute(
-                instruction_buffer.pubkey(),
-                input_buffer.pubkey(),
-                compute_buffer.pubkey(),
-            ),
-        );
-    }
-
-    let mut transaction = Transaction::new_with_payer(
-        instructions.as_slice(),
-        Some(&payer.pubkey()),
-    );
-    transaction.sign(&[&payer], recent_blockhash);
-    banks_client.process_transaction(transaction).await.unwrap();
+    crank_dsl(
+        &dsl, 10, &payer, &mut banks_client, recent_blockhash,
+        &instruction_buffer, &input_buffer, &compute_buffer,
+    ).await;
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
 
