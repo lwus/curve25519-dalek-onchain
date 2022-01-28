@@ -474,6 +474,45 @@ pub fn elligator_to_curve_instructions() -> Vec<u8> {
 }
 
 #[cfg(not(target_arch = "bpf"))]
+pub fn decompress_edwards_instructions() -> Vec<u8> {
+    // compute buffer is laid out as
+    // [
+    //   ..header..,
+    //   ..result_space..,
+    //   ..scratch_space..,
+    // ]
+    let result_space_size = 32 * 4;
+    let scratch_space = HEADER_SIZE + result_space_size;
+
+    let mut instructions = vec![];
+
+    let input_num = 0;
+    let input_offset = HEADER_SIZE + input_num * 32;
+    let scratch_space = scratch_space.try_into().unwrap();
+    instructions.extend_from_slice(&[
+        DSLInstruction::CopyInput(CopyInputData{
+            input_offset: input_offset.try_into().unwrap(),
+            compute_offset: scratch_space,
+            bytes: 32,
+        }),
+        DSLInstruction::DecompressEdwardsInit(RunDecompressData{
+            offset: scratch_space,
+        }),
+        DSLInstruction::Pow22501P1(RunDecompressData{
+            offset: scratch_space + 32,
+        }),
+        DSLInstruction::Pow22501P2(RunDecompressData{
+            offset: scratch_space + 64,
+        }),
+        DSLInstruction::DecompressEdwardsFini(RunDecompressData{
+            offset: scratch_space,
+        }),
+    ]);
+
+    dsl_instructions_to_bytes(&instructions)
+}
+
+#[cfg(not(target_arch = "bpf"))]
 fn dsl_instructions_to_bytes(
     instructions: &[DSLInstruction]
 ) -> Vec<u8> {

@@ -381,3 +381,129 @@ async fn test_elligator() {
         ).0,
     );
 }
+
+#[tokio::test]
+async fn test_edwards_decompress() {
+    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
+
+    // pc.set_bpf_compute_max_units(350_000);
+
+    let (mut banks_client, payer, recent_blockhash) = pc.start().await;
+
+    let rent = banks_client.get_rent().await;
+    let rent = rent.unwrap();
+
+    let compute_buffer = Keypair::new();
+    let input_buffer = Keypair::new();
+    let instruction_buffer = Keypair::new();
+
+    // TODO
+    let compressed_bytes = [
+        192, 159, 185,   8,  80, 193, 111, 204,
+        177, 250,  63,  89, 188, 196, 199,  68,
+        158, 221,  44, 213,   5, 206,  90, 160,
+        47, 227, 131, 187,  95, 229,  66,  50
+    ];
+
+    let dsl = instruction::decompress_edwards_instructions();
+
+    let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
+    let input_buffer_len = instruction::HEADER_SIZE + 32;
+
+    // scratch + result space
+    let compute_buffer_len = instruction::HEADER_SIZE + 1000;
+
+    let mut instructions = vec![];
+    instructions.extend_from_slice(
+        &create_buffer_instructions(
+            &payer,
+            &rent,
+            &instruction_buffer,
+            instruction_buffer_len,
+            &input_buffer,
+            input_buffer_len,
+            &compute_buffer,
+            compute_buffer_len,
+        ),
+    );
+
+    // write the instructions
+    let mut dsl_idx = 0;
+    let dsl_chunk = 800;
+    loop {
+        let end = (dsl_idx+dsl_chunk).min(dsl.len());
+        let done = end == dsl.len();
+        instructions.push(
+            instruction::write_bytes(
+                instruction_buffer.pubkey(),
+                payer.pubkey(),
+                (instruction::HEADER_SIZE + dsl_idx) as u32,
+                done,
+                &dsl[dsl_idx..end],
+            )
+        );
+        if done {
+            break;
+        } else {
+            dsl_idx = end;
+        }
+    }
+
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::HEADER_SIZE as u32,
+            true,
+            &compressed_bytes,
+        ),
+    );
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer, &instruction_buffer, &input_buffer, &compute_buffer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+
+    instructions.clear();
+
+    instructions.push(
+        ComputeBudgetInstruction::request_units(500_000),
+    );
+    // crank baby
+    let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
+    for _i in 0..num_cranks {
+        instructions.push(
+            instruction::crank_compute(
+                instruction_buffer.pubkey(),
+                input_buffer.pubkey(),
+                compute_buffer.pubkey(),
+            ),
+        );
+    }
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+
+    let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 6;
+    let decompress_result_bytes = &account.data[buffer_idx..128+buffer_idx];
+    let decompress_result = curve25519_dalek::edwards::EdwardsPoint::from_bytes(
+        decompress_result_bytes
+    );
+
+    println!("F {:?}", &curve25519_dalek::field::FieldElement::from_bytes(&compressed_bytes));
+    println!("decompress {:x?}", decompress_result_bytes);
+
+    assert_eq!(
+        decompress_result,
+        curve25519_dalek::edwards::CompressedEdwardsY(compressed_bytes).decompress().unwrap(),
+    );
+}
