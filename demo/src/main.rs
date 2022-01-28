@@ -41,8 +41,8 @@ fn send(
     let mut transaction =
         Transaction::new_unsigned(Message::new(instructions, Some(&signers[0].pubkey())));
 
-    let (recent_blockhash, _fee_calculator) = rpc_client
-        .get_recent_blockhash()
+    let recent_blockhash = rpc_client
+        .get_latest_blockhash()
         .map_err(|err| format!("error: unable to get recent blockhash: {}", err))?;
 
     transaction
@@ -220,7 +220,7 @@ fn process_demo(
     while current < num_cranks {
         instructions.clear();
         let iter_start = current;
-        for j in 0..instructions_per_tx {
+        for _ in 0..instructions_per_tx {
             if current >= num_cranks {
                 break;
             }
