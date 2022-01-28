@@ -89,6 +89,7 @@ pub enum DSLInstruction {
     MultiscalarMul(MultiscalarMulData),
 
     DecompressEdwards(RunSplitComputeData), // 2 steps
+    CompressEdwards(RunSplitComputeData), // 2 steps
     Elligator(RunSplitComputeData), // 2 steps
     MontgomeryElligator(RunSplitComputeData), // 3 steps
     MontgomeryToEdwards(MontgomeryToEdwardsData), // 2 steps
@@ -611,6 +612,47 @@ pub fn decompress_edwards_instructions() -> Vec<u8> {
             offset: scratch_space + 64,
         }),
         DSLInstruction::DecompressEdwards(RunSplitComputeData{
+            offset: scratch_space,
+            step: 1,
+        }),
+    ]);
+
+    dsl_instructions_to_bytes(&instructions)
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn compress_edwards_instructions() -> Vec<u8> {
+    // compute buffer is laid out as
+    // [
+    //   ..header..,
+    //   ..result_space..,
+    //   ..scratch_space..,
+    // ]
+    let result_space_size = 32 * 4;
+    let scratch_space = HEADER_SIZE + result_space_size;
+
+    let mut instructions = vec![];
+
+    let input_num = 0;
+    let input_offset = HEADER_SIZE + input_num * 32;
+    let scratch_space = scratch_space.try_into().unwrap();
+    instructions.extend_from_slice(&[
+        DSLInstruction::CopyInput(CopyInputData{
+            input_offset: input_offset.try_into().unwrap(),
+            compute_offset: scratch_space,
+            bytes: 128,
+        }),
+        DSLInstruction::CompressEdwards(RunSplitComputeData{
+            offset: scratch_space,
+            step: 0,
+        }),
+        DSLInstruction::Pow22501P1(RunDecompressData{
+            offset: scratch_space + 32 * 4,
+        }),
+        DSLInstruction::Pow22501P2(RunDecompressData{
+            offset: scratch_space + 32 * 5,
+        }),
+        DSLInstruction::CompressEdwards(RunSplitComputeData{
             offset: scratch_space,
             step: 1,
         }),

@@ -587,3 +587,94 @@ async fn test_edwards_decompress() {
         curve25519_dalek::edwards::CompressedEdwardsY(compressed_bytes).decompress().unwrap(),
     );
 }
+
+#[tokio::test]
+async fn test_edwards_compress() {
+    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
+
+    // pc.set_bpf_compute_max_units(350_000);
+
+    let (mut banks_client, payer, recent_blockhash) = pc.start().await;
+
+    let rent = banks_client.get_rent().await;
+    let rent = rent.unwrap();
+
+    let compute_buffer = Keypair::new();
+    let input_buffer = Keypair::new();
+    let instruction_buffer = Keypair::new();
+
+    // TODO
+    let compressed_bytes = [
+        192, 159, 185,   8,  80, 193, 111, 204,
+        177, 250,  63,  89, 188, 196, 199,  68,
+        158, 221,  44, 213,   5, 206,  90, 160,
+        47, 227, 131, 187,  95, 229,  66,  50
+    ];
+
+    let decompressed = curve25519_dalek::edwards::CompressedEdwardsY(compressed_bytes).decompress().unwrap();
+
+    let mut decompressed_bytes = [0; 128];
+    decompressed_bytes[  ..32].copy_from_slice(&decompressed.X.to_bytes());
+    decompressed_bytes[32..64].copy_from_slice(&decompressed.Y.to_bytes());
+    decompressed_bytes[64..96].copy_from_slice(&decompressed.Z.to_bytes());
+    decompressed_bytes[96..  ].copy_from_slice(&decompressed.T.to_bytes());
+
+    let dsl = instruction::compress_edwards_instructions();
+
+    let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
+    let input_buffer_len = instruction::HEADER_SIZE + 128;
+
+    // scratch + result space
+    let compute_buffer_len = instruction::HEADER_SIZE + 1000;
+
+    let mut instructions = vec![];
+    instructions.extend_from_slice(
+        &create_buffer_instructions(
+            &payer,
+            &rent,
+            &instruction_buffer,
+            instruction_buffer_len,
+            &input_buffer,
+            input_buffer_len,
+            &compute_buffer,
+            compute_buffer_len,
+        ),
+    );
+
+    write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
+
+    instructions.push(
+        instruction::write_bytes(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            instruction::HEADER_SIZE as u32,
+            true,
+            &decompressed_bytes,
+        ),
+    );
+
+    let mut transaction = Transaction::new_with_payer(
+        instructions.as_slice(),
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer, &instruction_buffer, &input_buffer, &compute_buffer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+
+
+    crank_dsl(
+        &dsl, 10, &payer, &mut banks_client, recent_blockhash,
+        &instruction_buffer, &input_buffer, &compute_buffer,
+    ).await;
+
+    let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
+
+    let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 9;
+    let compress_result_bytes = &account.data[buffer_idx..32+buffer_idx];
+
+    println!("compress {:x?}", compress_result_bytes);
+
+    assert_eq!(
+        compress_result_bytes,
+        decompressed.compress().0,
+    );
+}

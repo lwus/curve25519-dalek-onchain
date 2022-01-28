@@ -247,6 +247,14 @@ fn process_dsl_instruction(
                 step,
             )
         }
+        DSLInstruction::CompressEdwards(RunSplitComputeData{ offset, step }) => {
+            msg!("CompressEdwards {}", step);
+            process_compress_edwards(
+                compute_buffer_info,
+                offset,
+                step,
+            )
+        }
         DSLInstruction::Elligator(RunSplitComputeData{ offset, step }) => {
             msg!("Elligator {}", step);
             process_elligator(
@@ -685,8 +693,48 @@ fn process_decompress_edwards(
     Ok(())
 }
 
-fn process_elligator(
+fn process_compress_edwards(
     compute_buffer_info: &AccountInfo,
+    offset: u32,
+    step: u8,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+    let point = EdwardsPoint::from_bytes(
+        &compute_buffer_data[offset..offset+128]
+    );
+
+    if step == 0 {
+        // could be probably skip this if adding some kind of result offset to every
+        // instruction...
+        let offset = offset + 32 * 4;
+        compute_buffer_data[offset..offset+32].copy_from_slice(
+            &point.Z.to_bytes()
+        );
+        return Ok(());
+    }
+
+    // invert
+    let t3 = read_field_element(&compute_buffer_data, offset + 32 * 7)?;
+    let t19 = read_field_element(&compute_buffer_data, offset + 32 * 8)?;
+    let recip = &t19.pow2k(5) * &t3;
+
+    let x = &point.X * &recip;
+    let y = &point.Y * &recip;
+    let mut s: [u8; 32];
+
+    s = y.to_bytes();
+    s[31] ^= x.is_negative().unwrap_u8() << 7;
+
+    let offset = offset + 32 * 9;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&s);
+
+    Ok(())
+}
+
+fn process_elligator(
+compute_buffer_info: &AccountInfo,
     offset: u32,
     step: u8,
 ) -> ProgramResult {
@@ -766,6 +814,7 @@ fn process_montgomery_elligator(
         return Ok(());
     }
 
+    // invert
     let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
     let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let d_1_inv = &t19.pow2k(5) * &t3;
@@ -830,6 +879,7 @@ fn process_montgomery_to_edwards(
         return Ok(());
     }
 
+    // invert
     let t3 = read_field_element(&compute_buffer_data, offset + 32 * 4)?;
     let t19 = read_field_element(&compute_buffer_data, offset + 32 * 5)?;
     let up1_inv = &t19.pow2k(5) * &t3;
