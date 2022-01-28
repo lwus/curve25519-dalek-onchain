@@ -143,6 +143,11 @@ impl EdwardsPoint {
         }
     }
 
+    /// Multiply by the cofactor: return \\([8]P\\).
+    pub fn mul_by_cofactor(&self) -> EdwardsPoint {
+        self.mul_by_pow_2(3)
+    }
+
     /// Compute \\([2\^k] P \\) by successive doublings. Requires \\( k > 0 \\).
     pub(crate) fn mul_by_pow_2(&self, k: u32) -> EdwardsPoint {
         debug_assert!( k > 0 );

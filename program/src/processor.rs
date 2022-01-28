@@ -269,23 +269,47 @@ fn process_dsl_instruction(
             )
         }
 
-        DSLInstruction::EdwardsElligatorInit(RunDecompressData{ offset }) => {
-            msg!("EdwardsElligatorInit");
-            process_edwards_elligator_init(
+        DSLInstruction::MontgomeryElligatorInit(RunDecompressData{ offset }) => {
+            msg!("MontgomeryElligatorInit");
+            process_montgomery_elligator_init(
                 compute_buffer_info,
                 offset,
             )
         }
-        DSLInstruction::EdwardsElligatorMidi(RunDecompressData{ offset }) => {
-            msg!("EdwardsElligatorMidi");
-            process_edwards_elligator_midi(
+        DSLInstruction::MontgomeryElligatorMidi(RunDecompressData{ offset }) => {
+            msg!("MontgomeryElligatorMidi");
+            process_montgomery_elligator_midi(
                 compute_buffer_info,
                 offset,
             )
         }
-        DSLInstruction::EdwardsElligatorFini(RunDecompressData{ offset }) => {
-            msg!("EdwardsElligatorFini");
-            process_edwards_elligator_fini(
+        DSLInstruction::MontgomeryElligatorFini(RunDecompressData{ offset }) => {
+            msg!("MontgomeryElligatorFini");
+            process_montgomery_elligator_fini(
+                compute_buffer_info,
+                offset,
+            )
+        }
+
+        DSLInstruction::MontgomeryToEdwardsInit(RunDecompressData{ offset }) => {
+            msg!("MontgomeryToEdwardsInit");
+            process_montgomery_to_edwards_init(
+                compute_buffer_info,
+                offset,
+            )
+        }
+        DSLInstruction::MontgomeryToEdwardsMidi(MontgomeryToEdwardsData{ offset, sign_offset }) => {
+            msg!("MontgomeryToEdwardsMidi");
+            process_montgomery_to_edwards_midi(
+                compute_buffer_info,
+                offset,
+                sign_offset,
+            )
+        }
+        // decompress edwards after...
+        DSLInstruction::InPlaceMulByCofactor(RunDecompressData{ offset }) => {
+            msg!("InPlaceMulByCofactor");
+            process_in_place_mul_by_cofactor(
                 compute_buffer_info,
                 offset,
             )
@@ -753,6 +777,7 @@ fn process_decompress_edwards_fini(
     };
 
     if is_valid_y_coord.unwrap_u8() != 1u8 {
+        msg!("Invalid y coordinate");
         return Err(ProgramError::InvalidArgument);
     }
 
@@ -883,7 +908,7 @@ fn process_elligator_fini(
     Ok(())
 }
 
-fn process_edwards_elligator_init(
+fn process_montgomery_elligator_init(
     compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
@@ -907,7 +932,7 @@ fn process_edwards_elligator_init(
     Ok(())
 }
 
-fn process_edwards_elligator_midi(
+fn process_montgomery_elligator_midi(
     compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
@@ -916,10 +941,6 @@ fn process_edwards_elligator_midi(
     let offset = offset as usize;
 
     let one = FieldElement::one();
-    let r_0 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
 
     let offset = offset + 32 * 4;
     let t3 = FieldElement::from_bytes(
@@ -958,7 +979,7 @@ fn process_edwards_elligator_midi(
     Ok(())
 }
 
-fn process_edwards_elligator_fini(
+fn process_montgomery_elligator_fini(
     compute_buffer_info: &AccountInfo,
     offset: u32,
 ) -> ProgramResult {
@@ -967,10 +988,6 @@ fn process_edwards_elligator_fini(
     let offset = offset as usize;
 
     let one = FieldElement::one();
-    let r_0 = FieldElement::from_bytes(
-        compute_buffer_data[offset..offset+32]
-            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
-    );
 
     let offset = offset + 32 * 4;
     let t3 = FieldElement::from_bytes(
@@ -1029,6 +1046,99 @@ fn process_edwards_elligator_fini(
     let offset = offset + 32;
     compute_buffer_data[offset..offset+32].copy_from_slice(
         &u.to_bytes());
+
+    Ok(())
+}
+
+fn process_montgomery_to_edwards_init(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let u = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    if u == FieldElement::minus_one() {
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let one = FieldElement::one();
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(
+        &(&u + &one).to_bytes()
+    );
+
+    Ok(())
+}
+
+fn process_montgomery_to_edwards_midi(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+    sign_offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let u = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    if u == FieldElement::minus_one() {
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let one = FieldElement::one();
+
+    let offset = offset + 32 * 4;
+    let t3 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let offset = offset + 32;
+    let t19 = FieldElement::from_bytes(
+        compute_buffer_data[offset..offset+32]
+            .try_into().map_err(|_| ProgramError::InvalidArgument)?,
+    );
+
+    let up1_inv = &t19.pow2k(5) * &t3;
+
+    let y = &(&u - &one) * &up1_inv;
+
+    let sign = (compute_buffer_data[sign_offset as usize] & 0x80) >> 7;
+
+    let mut y_bytes = y.to_bytes();
+    y_bytes[31] ^= sign << 7;
+
+    let offset = offset + 32;
+    compute_buffer_data[offset..offset+32].copy_from_slice(&y_bytes);
+
+    Ok(())
+}
+
+fn process_in_place_mul_by_cofactor(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+
+    let point = EdwardsPoint::from_bytes(
+        &compute_buffer_data[offset..offset+128]
+    );
+
+    compute_buffer_data[offset..offset+128].copy_from_slice(
+        &point.mul_by_cofactor().to_bytes()
+    );
 
     Ok(())
 }

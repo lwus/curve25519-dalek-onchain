@@ -426,15 +426,13 @@ async fn test_edwards_elligator() {
 
     let sign_bit = (res[31] & 0x80) >> 7;
 
-    let fe = curve25519_dalek::field::FieldElement::from_bytes(&res);
-
     instructions.push(
         instruction::write_bytes(
             input_buffer.pubkey(),
             payer.pubkey(),
             instruction::HEADER_SIZE as u32,
             true,
-            &fe.to_bytes(),
+            &res,
         ),
     );
 
@@ -446,47 +444,94 @@ async fn test_edwards_elligator() {
     banks_client.process_transaction(transaction).await.unwrap();
 
 
-    instructions.clear();
-
-    instructions.push(
-        ComputeBudgetInstruction::request_units(800_000),
-    );
-    // crank baby
     let num_cranks = dsl.len() / instruction::INSTRUCTION_SIZE;
-    for _i in 0..num_cranks {
-        instructions.push(
-            instruction::crank_compute(
-                instruction_buffer.pubkey(),
-                input_buffer.pubkey(),
-                compute_buffer.pubkey(),
-            ),
-        );
-    }
+    let mut crank_count = 0;
+    let iters = 2;
+    for iter in 0..iters {
+        instructions.clear();
 
-    let mut transaction = Transaction::new_with_payer(
-        instructions.as_slice(),
-        Some(&payer.pubkey()),
-    );
-    transaction.sign(&[&payer], recent_blockhash);
-    banks_client.process_transaction(transaction).await.unwrap();
+        instructions.push(instruction::noop(iter as u64));
+        instructions.push(
+            ComputeBudgetInstruction::request_units(1_000_000),
+        );
+        // crank baby
+        for _i in 0..(num_cranks + iters - 1) / iters {
+            if crank_count >= num_cranks { break; }
+            crank_count += 1;
+            instructions.push(
+                instruction::crank_compute(
+                    instruction_buffer.pubkey(),
+                    input_buffer.pubkey(),
+                    compute_buffer.pubkey(),
+                ),
+            );
+        }
+
+        let mut transaction = Transaction::new_with_payer(
+            instructions.as_slice(),
+            Some(&payer.pubkey()),
+        );
+        transaction.sign(&[&payer], recent_blockhash);
+        banks_client.process_transaction(transaction).await.unwrap();
+    }
 
     let account = banks_client.get_account(compute_buffer.pubkey()).await.unwrap().unwrap();
 
     let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 11;
-    let edwards_elligator_result_bytes = &account.data[buffer_idx..32+buffer_idx];
-    let edwards_elligator_result = curve25519_dalek::montgomery::MontgomeryPoint(
-        edwards_elligator_result_bytes.try_into().unwrap(),
+    let montgomery_elligator_result_bytes = &account.data[buffer_idx..32+buffer_idx];
+    let montgomery_elligator_result = curve25519_dalek::montgomery::MontgomeryPoint(
+        montgomery_elligator_result_bytes.try_into().unwrap(),
     );
+
+    let fe = curve25519_dalek::field::FieldElement::from_bytes(&res);
 
     println!("F {:?}", &fe);
-    println!("Elligator {:x?}", edwards_elligator_result_bytes);
+    println!("Elligator {:x?}", montgomery_elligator_result_bytes);
 
     assert_eq!(
-        edwards_elligator_result,
-        curve25519_dalek::montgomery::elligator_encode(
-            &fe,
-        ),
+        montgomery_elligator_result,
+        curve25519_dalek::montgomery::elligator_encode(&fe),
     );
+
+    let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 17;
+    let compressed_bytes = &account.data[buffer_idx..32+buffer_idx];
+    {
+        let u = curve25519_dalek::field::FieldElement::from_bytes(&montgomery_elligator_result.0);
+
+        let one = curve25519_dalek::field::FieldElement::one();
+
+        let y = &(&u - &one) * &(&u + &one).invert();
+
+        let mut y_bytes = y.to_bytes();
+        y_bytes[31] ^= sign_bit << 7;
+
+        println!("Compressed {:x?}", compressed_bytes);
+
+        assert_eq!(
+            y_bytes,
+            compressed_bytes,
+        );
+    }
+
+    let buffer_idx = instruction::HEADER_SIZE + 32 * 4 + 32 * 23;
+    let edwards_result_bytes = &account.data[buffer_idx..128+buffer_idx];
+    let hash_result = curve25519_dalek::edwards::EdwardsPoint::from_bytes(
+        edwards_result_bytes
+    );
+
+    let expected = curve25519_dalek::edwards::EdwardsPoint::hash_from_bytes::<Sha512>(&input_bytes);
+    let decompressed = curve25519_dalek::edwards::CompressedEdwardsY(
+        compressed_bytes.try_into().unwrap(),
+    ).decompress().unwrap().mul_by_cofactor();
+
+    assert_eq!(expected, decompressed);
+
+    println!("Edwards {:x?}", edwards_result_bytes);
+
+    assert_eq!(hash_result.X.to_bytes(), expected.X.to_bytes());
+    assert_eq!(hash_result.Y.to_bytes(), expected.Y.to_bytes());
+    assert_eq!(hash_result.Z.to_bytes(), expected.Z.to_bytes());
+    assert_eq!(hash_result.T.to_bytes(), expected.T.to_bytes());
 }
 
 #[tokio::test]
