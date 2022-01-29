@@ -96,6 +96,37 @@ pub(crate) const MONTGOMERY_A_NEG: FieldElement51 = FieldElement51([
     2251799813685247,
 ]);
 
+/// The Ed25519 basepoint, as an `EdwardsPoint`.
+///
+/// This is called `_POINT` to distinguish it from
+/// `ED25519_BASEPOINT_TABLE`, which should be used for scalar
+/// multiplication (it's much faster).
+pub const ED25519_BASEPOINT_POINT: crate::edwards::EdwardsPoint = crate::edwards::EdwardsPoint {
+    X: FieldElement51([
+        1738742601995546,
+        1146398526822698,
+        2070867633025821,
+        562264141797630,
+        587772402128613,
+    ]),
+    Y: FieldElement51([
+        1801439850948184,
+        1351079888211148,
+        450359962737049,
+        900719925474099,
+        1801439850948198,
+    ]),
+    Z: FieldElement51([1, 0, 0, 0, 0]),
+    T: FieldElement51([
+        1841354044333475,
+        16398895984059,
+        755974180946558,
+        900171276175154,
+        1821297809914039,
+    ]),
+};
+
+
 /// `L` is the order of base point, i.e. 2^252 + 27742317777372353535851937790883648493
 pub(crate) const L: Scalar52 = Scalar52([
     0x0002631a5cf5d3ed,
