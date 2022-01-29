@@ -282,11 +282,12 @@ fn process_dsl_instruction(
             )
         }
         // decompress edwards after...
-        DSLInstruction::InPlaceMulByCofactor(RunDecompressData{ offset }) => {
-            msg!("InPlaceMulByCofactor");
-            process_in_place_mul_by_cofactor(
+        DSLInstruction::MulByCofactor(BuildLookupTableData{ point_offset, table_offset }) => {
+            msg!("MulByCofactor");
+            process_mul_by_cofactor(
                 compute_buffer_info,
-                offset,
+                point_offset,
+                table_offset,
             )
         }
 
@@ -897,19 +898,20 @@ fn process_montgomery_to_edwards(
     Ok(())
 }
 
-fn process_in_place_mul_by_cofactor(
+fn process_mul_by_cofactor(
     compute_buffer_info: &AccountInfo,
     offset: u32,
+    result_offset: u32,
 ) -> ProgramResult {
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
 
     let offset = offset as usize;
-
     let point = EdwardsPoint::from_bytes(
         &compute_buffer_data[offset..offset+128]
     );
 
-    compute_buffer_data[offset..offset+128].copy_from_slice(
+    let result_offset = result_offset as usize;
+    compute_buffer_data[result_offset..result_offset+128].copy_from_slice(
         &point.mul_by_cofactor().to_bytes()
     );
 

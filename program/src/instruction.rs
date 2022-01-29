@@ -93,7 +93,7 @@ pub enum DSLInstruction {
     Elligator(RunSplitComputeData), // 2 steps
     MontgomeryElligator(RunSplitComputeData), // 3 steps
     MontgomeryToEdwards(MontgomeryToEdwardsData), // 2 steps
-    InPlaceMulByCofactor(RunDecompressData),
+    MulByCofactor(BuildLookupTableData), // 1 step. writes to table_offset
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
@@ -547,8 +547,10 @@ pub fn edwards_elligator_to_curve_instructions(
             offset: scratch_space + 32 * 17,
             step: 1,
         }),
-        DSLInstruction::InPlaceMulByCofactor(RunDecompressData{
-            offset: scratch_space + 32 * 23,
+        // in place
+        DSLInstruction::MulByCofactor(BuildLookupTableData{
+            point_offset: scratch_space + 32 * 23,
+            table_offset: scratch_space + 32 * 23,
         }),
     ]
 }
