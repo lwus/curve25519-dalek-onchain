@@ -111,7 +111,7 @@ fn process_dsl_instruction(
     let input_buffer_info = next_account_info(account_info_iter)?;
     let compute_buffer_info = next_account_info(account_info_iter)?;
 
-    if *instruction_buffer_info.owner != crate::ID {
+    if *instruction_buffer_info.owner != crate::ID || instruction_buffer_info.is_writable {
         msg!("Bad instruction buffer {} vs {}", instruction_buffer_info.owner, crate::ID);
         return Err(ProgramError::InvalidArgument);
     }
