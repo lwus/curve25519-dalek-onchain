@@ -175,29 +175,47 @@ async fn test_multiscalar_mul() {
 
     use curve25519_dalek_onchain::scalar::Scalar;
     let scalars = vec![
+        -Scalar::one() - Scalar::one(),
+        Scalar::one() + Scalar::one(),
+        Scalar::one(),
         -Scalar::one(),
         Scalar::one(),
         Scalar::one(),
-        -Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
+        Scalar::one(),
     ];
 
+    use curve25519_dalek::traits::Identity;
     let points = vec![
         element_bytes,
         element_bytes,
         neg_element_bytes,
         neg_element_bytes,
+
+        element_bytes,
+        neg_element_bytes,
+        element_bytes,
+        neg_element_bytes,
+        element_bytes,
+        neg_element_bytes,
+        curve25519_dalek::ristretto::RistrettoPoint(
+            curve25519_dalek::edwards::EdwardsPoint::identity()
+        ).compress().to_bytes(),
     ];
 
     assert_eq!(scalars.len(), points.len());
 
-    let proof_groups = vec![2, 2];
+    let proof_groups = vec![11];
     let dsl = instruction::transer_proof_instructions(proof_groups.clone());
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2 + 128;
 
     // pick a large number... at least > 8 * 128 * scalars.len()
-    let compute_buffer_len = instruction::HEADER_SIZE + 10000;
+    let compute_buffer_len = instruction::HEADER_SIZE + 102400;
 
     let mut instructions = vec![];
     instructions.extend_from_slice(
@@ -233,7 +251,7 @@ async fn test_multiscalar_mul() {
 
 
     crank_dsl(
-        &dsl, 10, &payer, &mut banks_client, recent_blockhash,
+        &dsl, 5, &payer, &mut banks_client, recent_blockhash,
         &instruction_buffer, &input_buffer, &compute_buffer,
     ).await;
 
