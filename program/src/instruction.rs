@@ -195,25 +195,49 @@ pub fn write_input_buffer(
     authority: Pubkey,
     points: &[[u8; 32]],
     scalars: &[crate::scalar::Scalar],
-) -> Vec<Instruction> {
+) -> Option<Vec<Instruction>> {
     assert_eq!(points.len(), scalars.len());
 
+    let points_with_witnesses = points.iter().map(
+        |p| -> Option<[u8; 64]> {
+            let mut res = [0u8; 64];
+            res[..32].copy_from_slice(p);
+
+            #[allow(non_snake_case)]
+            let Iinv_sq = crate::ristretto::CompressedRistretto(*p)
+                .decompress_init()?;
+
+            use curve25519_dalek::field::FieldElement;
+            let (ok, witness) = &FieldElement::from_bytes(
+                &Iinv_sq.to_bytes(),
+            ).invsqrt();
+
+            if ok.unwrap_u8() != 1 { return None; }
+            if &Iinv_sq * &crate::field::FieldElement::from_bytes(&witness.to_bytes()).square() != crate::field::FieldElement::one() {
+                return None;
+            }
+
+            res[32..].copy_from_slice(&witness.to_bytes());
+
+            Some(res)
+        }).collect::<Option<Vec<_>>>()?;
+
     use crate::traits::Identity;
-    return vec![
+    return Some(vec![
         // write the points
         write_bytes(
             input_buffer,
             authority,
             HEADER_SIZE as u32,
             false,
-            bytemuck::cast_slice::<[u8; 32], u8>(points)
+            bytemuck::cast_slice::<[u8; 64], u8>(&points_with_witnesses)
         ),
 
         // write the scalars
         write_bytes(
             input_buffer,
             authority,
-            (HEADER_SIZE + scalars.len() * 32) as u32,
+            (HEADER_SIZE + scalars.len() * 32 * 2) as u32,
             false,
             bytemuck::cast_slice::<[u8; 32], u8>(
                 scalars.iter().map(|s| s.to_packed_radix_16()).collect::<Vec<_>>().as_slice()),
@@ -223,11 +247,11 @@ pub fn write_input_buffer(
         write_bytes(
             input_buffer,
             authority,
-            (HEADER_SIZE + scalars.len() * 32 * 2) as u32,
+            (HEADER_SIZE + scalars.len() * 32 * 3) as u32,
             true,
             &crate::edwards::EdwardsPoint::identity().to_bytes(),
         ),
-    ];
+    ]);
 }
 
 #[cfg(not(target_arch = "bpf"))]
@@ -333,7 +357,7 @@ pub fn noop(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn transer_proof_instructions(
+pub fn transfer_proof_instructions(
     proof_groups: Vec<usize>,
 ) -> Vec<u8> {
     // input buffer is laid out as
@@ -354,7 +378,7 @@ pub fn transer_proof_instructions(
     let result_space_size = proof_groups.len() * 32 * 4;
     let scratch_space = HEADER_SIZE + result_space_size;
     let scratch_space_size = 32 * 12; // space needed for decompression
-    let decompress_res_offset = 32 * 8; // where decompressed result is written
+    let decompress_res_offset = 32 * 2; // where decompressed result is written
 
     let scalars_offset = scratch_space + scratch_space_size;
     let tables_offset  = scalars_offset + 32 * num_proof_scalars;
@@ -364,31 +388,16 @@ pub fn transer_proof_instructions(
 
     // build the lookup tables
     for input_num in 0..num_proof_inputs {
-        let input_offset = HEADER_SIZE + input_num * 32;
+        let input_offset = HEADER_SIZE + input_num * 32 * 2;
         let table_offset = tables_offset + input_num * table_size;
         let scratch_space = scratch_space.try_into().unwrap();
         instructions.extend_from_slice(&[
             DSLInstruction::CopyInput(CopyInputData{
                 input_offset: input_offset.try_into().unwrap(),
                 compute_offset: scratch_space,
-                bytes: 32,
+                bytes: 64,
             }),
-            DSLInstruction::DecompressInit(RunDecompressData{
-                offset: scratch_space,
-            }),
-            DSLInstruction::InvSqrtInit(RunDecompressData{
-                offset: scratch_space + 32,
-            }),
-            DSLInstruction::Pow22501P1(RunDecompressData{
-                offset: scratch_space + 64,
-            }),
-            DSLInstruction::Pow22501P2(RunDecompressData{
-                offset: scratch_space + 96,
-            }),
-            DSLInstruction::InvSqrtFini(RunDecompressData{
-                offset: scratch_space + 32,
-            }),
-            DSLInstruction::DecompressFini(RunDecompressData{
+            DSLInstruction::DecompressWithWitness(RunDecompressData{
                 offset: scratch_space,
             }),
             DSLInstruction::BuildLookupTable(BuildLookupTableData{
@@ -400,7 +409,7 @@ pub fn transer_proof_instructions(
 
     // copy the scalars
     let input_scalars_offset =
-        HEADER_SIZE + num_proof_inputs * 32;
+        HEADER_SIZE + num_proof_inputs * 32 * 2;
     for scalar_num in 0..num_proof_scalars {
         let input_offset = input_scalars_offset + scalar_num * 32;
         let compute_offset = scalars_offset + scalar_num * 32;

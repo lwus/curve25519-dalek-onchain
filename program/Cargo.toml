@@ -31,10 +31,10 @@ subtle = { version = "^2.2.1", default-features = false }
 zeroize = { version = "1", default-features = false }
 
 [target.'cfg(not(target_arch = "bpf"))'.dependencies]
+curve25519-dalek = { path = "/Users/lwu/code/solana/curve25519-dalek", features = ["serde"] }
 rand_core = { version = "0.6.3", default-features = false }
 
 [dev-dependencies]
-curve25519-dalek = { path = "/Users/lwu/code/solana/curve25519-dalek", features = ["serde"] }
 proptest = "0.10"
 rand = "0.7"
 sha2 = "0.9"

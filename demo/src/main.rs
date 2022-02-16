@@ -120,7 +120,7 @@ fn process_demo(
 
     assert_eq!(scalars.len(), points.len());
 
-    let dsl = instruction::transer_proof_instructions(vec![scalars.len()]);
+    let dsl = instruction::transfer_proof_instructions(vec![scalars.len()]);
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2 + 128;

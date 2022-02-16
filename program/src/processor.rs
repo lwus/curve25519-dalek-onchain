@@ -6,7 +6,6 @@ use crate::{
     ristretto::*,
     window::*,
     edwards::*,
-    scalar,
 };
 
 use solana_program::{

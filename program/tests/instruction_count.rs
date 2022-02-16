@@ -209,10 +209,10 @@ async fn test_multiscalar_mul() {
     assert_eq!(scalars.len(), points.len());
 
     let proof_groups = vec![11];
-    let dsl = instruction::transer_proof_instructions(proof_groups.clone());
+    let dsl = instruction::transfer_proof_instructions(proof_groups.clone());
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
-    let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 2 + 128;
+    let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 3 + 128;
 
     // pick a large number... at least > 8 * 128 * scalars.len()
     let compute_buffer_len = instruction::HEADER_SIZE + 102400;
@@ -239,7 +239,7 @@ async fn test_multiscalar_mul() {
             payer.pubkey(),
             points.as_slice(),
             scalars.as_slice(),
-        ).as_slice(),
+        ).unwrap().as_slice(),
     );
 
     let mut transaction = Transaction::new_with_payer(
