@@ -305,6 +305,14 @@ fn process_dsl_instruction(
                 &data,
             )
         }
+
+        DSLInstruction::DecompressWithWitness(RunDecompressData{ offset }) => {
+            msg!("DecompressWithWitness");
+            process_decompress_with_witness(
+                compute_buffer_info,
+                offset,
+            )
+        }
     }
 }
 
@@ -996,6 +1004,38 @@ fn process_multiscalar_mul(
 
     Ok(())
 }
+
+fn process_decompress_with_witness(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    let offset = offset as usize;
+    let point = CompressedRistretto::from_slice(
+        &compute_buffer_data[offset..offset+32]
+    );
+
+    let witness = read_field_element(&compute_buffer_data, offset + 32)?;
+
+    let Iinv_sq = point.decompress_init().ok_or(ProgramError::InvalidArgument)?;
+    // if !ok the witness should multiply to sqrt(-1) (aka i)
+    if &Iinv_sq * &witness.square() != FieldElement::one() {
+        msg!("Bad witness");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // some duplicate work in this...
+    let point = point.decompress_fini(&witness).ok_or(ProgramError::InvalidArgument)?;
+
+    let offset = offset + 32 * 2;
+    compute_buffer_data[offset..offset+128].copy_from_slice(
+        &point.0.to_bytes()
+    );
+
+    Ok(())
+}
+
 
 fn read_field_element(
     compute_buffer_data: &[u8],

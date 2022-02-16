@@ -94,6 +94,9 @@ pub enum DSLInstruction {
     MontgomeryElligator(RunSplitComputeData), // 3 steps
     MontgomeryToEdwards(MontgomeryToEdwardsData), // 2 steps
     MulByCofactor(BuildLookupTableData), // 1 step. writes to table_offset
+
+    // CompressedRistretto with witness for inverse sqrt
+    DecompressWithWitness(RunDecompressData),
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
