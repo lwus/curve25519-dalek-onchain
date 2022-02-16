@@ -97,7 +97,7 @@ pub enum DSLInstruction {
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
-pub const MAX_MULTISCALAR_POINTS: usize = 6;
+pub const MAX_MULTISCALAR_POINTS: usize = 11;
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug)]
 #[repr(C)]
@@ -213,7 +213,7 @@ pub fn write_input_buffer(
             (HEADER_SIZE + scalars.len() * 32) as u32,
             false,
             bytemuck::cast_slice::<[u8; 32], u8>(
-                scalars.iter().map(|s| s.bytes).collect::<Vec<_>>().as_slice()),
+                scalars.iter().map(|s| s.to_packed_radix_16()).collect::<Vec<_>>().as_slice()),
         ),
 
         // write identity for results

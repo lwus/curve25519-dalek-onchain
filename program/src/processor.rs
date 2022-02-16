@@ -961,18 +961,9 @@ fn process_multiscalar_mul(
 
     // deserialize scalars
     // TODO: just encode the radix_16 values directly?
-    let mut scalar_offset = u32::from(data.scalars_offset) as usize;
-    let mut scalar_digits_vec = Vec::with_capacity(num_inputs);
-    let mut bytes = [0; 32];
-    for _i in 0..num_inputs {
-        bytes.copy_from_slice(&compute_buffer_data[scalar_offset..scalar_offset+32]);
-        scalar_digits_vec.push(scalar::Scalar{ bytes }.to_radix_16());
-        scalar_offset += 32;
-    }
-
-    // probably don't need this since everything is public anyway...
-    let scalar_digits = scalar_digits_vec;
-    // let scalar_digits = zeroize::Zeroizing::new(scalar_digits_vec);
+    let scalar_offset = u32::from(data.scalars_offset) as usize;
+    let packed_scalar_digits = bytemuck::cast_slice::<u8, [u8; 32]>(
+        &compute_buffer_data[scalar_offset..scalar_offset + 32 * num_inputs]);
 
     // deserialize point computation
     let result_offset = u32::from(data.result_offset) as usize;
@@ -983,10 +974,15 @@ fn process_multiscalar_mul(
     // run compute
     for j in (data.start..data.end).rev() {
         Q = Q.mul_by_pow_2(4);
-        let it = scalar_digits.iter().zip(lookup_tables.iter());
+        let it = packed_scalar_digits.iter().zip(lookup_tables.iter());
         for (s_i, lookup_table_i) in it {
             // R_i = s_{i,j} * P_i
-            let R_i = lookup_table_i.select(s_i[j as usize]);
+            let packed_radix = if j & 1 == 1 {
+                (s_i[(j >> 1) as usize] as i8) >> 4
+            } else {
+                (s_i[(j >> 1) as usize] as i8) << 4 >> 4
+            };
+            let R_i = lookup_table_i.select(packed_radix);
             // Q = Q + R_i
             Q = (&Q + &R_i).to_extended();
         }

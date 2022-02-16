@@ -812,7 +812,7 @@ impl Scalar {
     ///    a = a\_0 + a\_1 16\^1 + \cdots + a_{63} 16\^{63},
     /// $$
     /// with \\(-8 \leq a_i < 8\\) for \\(0 \leq i < 63\\) and \\(-8 \leq a_{63} \leq 8\\).
-    pub(crate) fn to_radix_16(&self) -> [i8; 64] {
+    pub fn to_radix_16(&self) -> [i8; 64] {
         debug_assert!(self[31] <= 127);
         let mut output = [0i8; 64];
 
@@ -837,6 +837,21 @@ impl Scalar {
         }
         // Precondition note: output[63] is not recentered.  It
         // increases by carry <= 1.  Thus output[63] <= 8.
+
+        output
+    }
+
+    pub fn to_packed_radix_16(&self) -> [u8; 32] {
+        let unpacked = self.to_radix_16();
+        let mut output = [0u8; 32];
+
+        #[inline(always)]
+        fn bot_half(x: i8) -> i8 { (x >> 0) & 15 }
+
+        for i in 0..32 {
+            output[i] = (bot_half(unpacked[2*i  ]) as u8)
+                     | ((bot_half(unpacked[2*i+1]) as u8) << 4);
+        }
 
         output
     }
