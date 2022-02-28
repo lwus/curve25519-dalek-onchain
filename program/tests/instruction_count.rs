@@ -234,12 +234,23 @@ async fn test_multiscalar_mul() {
     write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
 
     instructions.extend_from_slice(
-        instruction::write_input_buffer(
+        instruction::write_input_points(
             input_buffer.pubkey(),
             payer.pubkey(),
             points.as_slice(),
-            scalars.as_slice(),
         ).unwrap().as_slice(),
+    );
+
+    instructions.extend_from_slice(
+        instruction::write_input_scalars_and_identity(
+            input_buffer.pubkey(),
+            payer.pubkey(),
+            scalars.as_slice(),
+        ).as_slice(),
+    );
+
+    instructions.extend_from_slice(
+        &instruction::finalize_buffer(input_buffer.pubkey(), payer.pubkey()),
     );
 
     let mut transaction = Transaction::new_with_payer(

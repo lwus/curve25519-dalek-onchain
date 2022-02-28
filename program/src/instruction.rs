@@ -190,14 +190,11 @@ pub fn write_bytes(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn write_input_buffer(
+pub fn write_input_points(
     input_buffer: Pubkey,
     authority: Pubkey,
     points: &[[u8; 32]],
-    scalars: &[crate::scalar::Scalar],
 ) -> Option<Vec<Instruction>> {
-    assert_eq!(points.len(), scalars.len());
-
     let points_with_witnesses = points.iter().map(
         |p| -> Option<[u8; 64]> {
             let mut res = [0u8; 64];
@@ -222,7 +219,6 @@ pub fn write_input_buffer(
             Some(res)
         }).collect::<Option<Vec<_>>>()?;
 
-    use crate::traits::Identity;
     return Some(vec![
         // write the points
         write_bytes(
@@ -232,7 +228,17 @@ pub fn write_input_buffer(
             false,
             bytemuck::cast_slice::<[u8; 64], u8>(&points_with_witnesses)
         ),
+    ]);
+}
 
+#[cfg(not(target_arch = "bpf"))]
+pub fn write_input_scalars_and_identity(
+    input_buffer: Pubkey,
+    authority: Pubkey,
+    scalars: &[crate::scalar::Scalar],
+) -> Vec<Instruction> {
+    use crate::traits::Identity;
+    return vec![
         // write the scalars
         write_bytes(
             input_buffer,
@@ -248,10 +254,26 @@ pub fn write_input_buffer(
             input_buffer,
             authority,
             (HEADER_SIZE + scalars.len() * 32 * 3) as u32,
-            true,
+            false,
             &crate::edwards::EdwardsPoint::identity().to_bytes(),
         ),
-    ]);
+    ];
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn finalize_buffer(
+    buffer: Pubkey,
+    authority: Pubkey,
+) -> Vec<Instruction> {
+    return vec![
+        write_bytes(
+            buffer,
+            authority,
+            HEADER_SIZE as u32,
+            true,
+            &[],
+        ),
+    ];
 }
 
 #[cfg(not(target_arch = "bpf"))]
