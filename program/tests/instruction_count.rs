@@ -269,7 +269,7 @@ async fn run_multiscalar_mul(
     );
 
     instructions.extend_from_slice(
-        instruction::write_input_scalars_and_identity(
+        instruction::write_input_scalars(
             input_buffer.pubkey(),
             payer.pubkey(),
             scalars,

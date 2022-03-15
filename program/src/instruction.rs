@@ -97,6 +97,7 @@ pub enum DSLInstruction {
 
     // CompressedRistretto with witness for inverse sqrt
     DecompressWithWitness(RunDecompressData),
+    WriteEdwardsIdentity(RunDecompressData),
 }
 
 // fits under the compute limits for deserialization + one iteration + serialization
@@ -255,14 +256,13 @@ pub fn write_input_points_with_witness(
 }
 
 #[cfg(not(target_arch = "bpf"))]
-pub fn write_input_scalars_and_identity(
+pub fn write_input_scalars(
     input_buffer: Pubkey,
     authority: Pubkey,
     scalars: &[crate::scalar::Scalar],
     with_witness: bool,
 ) -> Vec<Instruction> {
     let base = HEADER_SIZE + scalars.len() * proof_point_size(with_witness);
-    use crate::traits::Identity;
     return vec![
         // write the scalars
         write_bytes(
@@ -272,15 +272,6 @@ pub fn write_input_scalars_and_identity(
             false,
             bytemuck::cast_slice::<[u8; 32], u8>(
                 scalars.iter().map(|s| s.to_packed_radix_16()).collect::<Vec<_>>().as_slice()),
-        ),
-
-        // write identity for results
-        write_bytes(
-            input_buffer,
-            authority,
-            (base + scalars.len() * 32).try_into().unwrap(),
-            false,
-            &crate::edwards::EdwardsPoint::identity().to_bytes(),
         ),
     ];
 }
@@ -459,16 +450,13 @@ pub fn transfer_proof_instructions(
             bytes: scalar_bytes.try_into().unwrap(),
         }),
     );
-    input_offset += scalar_bytes;
 
-    // copy the identity inputs
+    // write the identity inputs
     let mut result_offset = HEADER_SIZE;
     for _group_size in proof_groups.iter() {
         instructions.push(
-            DSLInstruction::CopyInput(CopyInputData{
-                input_offset: input_offset.try_into().unwrap(),
-                compute_offset: result_offset.try_into().unwrap(),
-                bytes: 32 * 4,
+            DSLInstruction::WriteEdwardsIdentity(RunDecompressData{
+                offset: result_offset.try_into().unwrap(),
             }),
         );
         result_offset += 32 * 4;

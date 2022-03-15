@@ -181,6 +181,13 @@ fn process_dsl_instruction(
                 &offsets,
             )
         }
+        DSLInstruction::WriteEdwardsIdentity(RunDecompressData { offset }) => {
+            msg!("WriteEdwardsIdentity");
+            process_write_edwards_identity(
+                compute_buffer_info,
+                offset,
+            )
+        }
 
         // [
         //   x,
@@ -522,6 +529,26 @@ fn process_copy_input(
     ].copy_from_slice(&input_buffer_data[
         input_offset..input_offset+copy_bytes
     ]);
+
+    Ok(())
+}
+
+fn process_write_edwards_identity(
+    compute_buffer_info: &AccountInfo,
+    offset: u32,
+) -> ProgramResult {
+    let offset = offset as usize;
+    if offset < HEADER_SIZE {
+        msg!("Cannot copy to header");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+
+    use crate::traits::Identity;
+    compute_buffer_data[
+        offset..offset+128
+    ].copy_from_slice(&EdwardsPoint::identity().to_bytes());
 
     Ok(())
 }
