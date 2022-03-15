@@ -432,17 +432,13 @@ pub fn transfer_proof_instructions(
     // copy the scalars
     let input_scalars_offset =
         HEADER_SIZE + num_proof_inputs * 32 * 2;
-    for scalar_num in 0..num_proof_scalars {
-        let input_offset = input_scalars_offset + scalar_num * 32;
-        let compute_offset = scalars_offset + scalar_num * 32;
-        instructions.push(
-            DSLInstruction::CopyInput(CopyInputData{
-                input_offset: input_offset.try_into().unwrap(),
-                compute_offset: compute_offset.try_into().unwrap(),
-                bytes: 32,
-            }),
-        );
-    }
+    instructions.push(
+        DSLInstruction::CopyInput(CopyInputData{
+            input_offset: input_scalars_offset.try_into().unwrap(),
+            compute_offset: scalars_offset.try_into().unwrap(),
+            bytes: 32 * u32::try_from(num_proof_scalars).unwrap(),
+        }),
+    );
 
     // copy the identity inputs
     let mut result_offset = HEADER_SIZE;

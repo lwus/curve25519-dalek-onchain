@@ -494,12 +494,6 @@ fn process_copy_input(
     let mut input_buffer_ptr: &[u8] = input_buffer_data.borrow();
     let input_header = InputHeader::deserialize(&mut input_buffer_ptr)?;
 
-    let copy_bytes = offsets.bytes as usize;
-    if copy_bytes > 128 {
-        msg!("Copy slice size too large");
-        return Err(ProgramError::InvalidArgument);
-    }
-
     if input_header.key != Key::InputBufferV1 {
         msg!("Invalid buffer type");
         return Err(ProgramError::InvalidArgument);
@@ -522,6 +516,7 @@ fn process_copy_input(
     }
 
     let mut compute_buffer_data = compute_buffer_info.try_borrow_mut_data()?;
+    let copy_bytes = offsets.bytes as usize;
     compute_buffer_data[
         compute_offset..compute_offset+copy_bytes
     ].copy_from_slice(&input_buffer_data[
