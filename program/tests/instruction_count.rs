@@ -209,7 +209,7 @@ async fn test_multiscalar_mul() {
     assert_eq!(scalars.len(), points.len());
 
     let proof_groups = vec![11];
-    let dsl = instruction::transfer_proof_instructions(proof_groups.clone());
+    let dsl = instruction::transfer_proof_instructions(proof_groups.clone(), true);
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 3 + 128;
@@ -234,7 +234,7 @@ async fn test_multiscalar_mul() {
     write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
 
     instructions.extend_from_slice(
-        instruction::write_input_points(
+        instruction::write_input_points_with_witness(
             input_buffer.pubkey(),
             payer.pubkey(),
             points.as_slice(),
@@ -246,6 +246,7 @@ async fn test_multiscalar_mul() {
             input_buffer.pubkey(),
             payer.pubkey(),
             scalars.as_slice(),
+            true,
         ).as_slice(),
     );
 

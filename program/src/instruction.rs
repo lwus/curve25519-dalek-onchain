@@ -190,7 +190,30 @@ pub fn write_bytes(
 }
 
 #[cfg(not(target_arch = "bpf"))]
+fn proof_point_size(with_witness: bool) -> usize {
+    if with_witness { 32 * 2 } else { 32 }
+}
+
+#[cfg(not(target_arch = "bpf"))]
 pub fn write_input_points(
+    input_buffer: Pubkey,
+    authority: Pubkey,
+    points: &[[u8; 32]],
+) -> Option<Vec<Instruction>> {
+    return Some(vec![
+        // write the points
+        write_bytes(
+            input_buffer,
+            authority,
+            HEADER_SIZE as u32,
+            false,
+            bytemuck::cast_slice::<[u8; 32], u8>(&points)
+        ),
+    ]);
+}
+
+#[cfg(not(target_arch = "bpf"))]
+pub fn write_input_points_with_witness(
     input_buffer: Pubkey,
     authority: Pubkey,
     points: &[[u8; 32]],
@@ -236,14 +259,16 @@ pub fn write_input_scalars_and_identity(
     input_buffer: Pubkey,
     authority: Pubkey,
     scalars: &[crate::scalar::Scalar],
+    with_witness: bool,
 ) -> Vec<Instruction> {
+    let base = HEADER_SIZE + scalars.len() * proof_point_size(with_witness);
     use crate::traits::Identity;
     return vec![
         // write the scalars
         write_bytes(
             input_buffer,
             authority,
-            (HEADER_SIZE + scalars.len() * 32 * 2) as u32,
+            base.try_into().unwrap(),
             false,
             bytemuck::cast_slice::<[u8; 32], u8>(
                 scalars.iter().map(|s| s.to_packed_radix_16()).collect::<Vec<_>>().as_slice()),
@@ -253,7 +278,7 @@ pub fn write_input_scalars_and_identity(
         write_bytes(
             input_buffer,
             authority,
-            (HEADER_SIZE + scalars.len() * 32 * 3) as u32,
+            (base + scalars.len() * 32).try_into().unwrap(),
             false,
             &crate::edwards::EdwardsPoint::identity().to_bytes(),
         ),
@@ -381,6 +406,7 @@ pub fn noop(
 #[cfg(not(target_arch = "bpf"))]
 pub fn transfer_proof_instructions(
     proof_groups: Vec<usize>,
+    with_witness: bool,
 ) -> Vec<u8> {
     // input buffer is laid out as
     // [ ..header.., ..proof_inputs.., ..proof_scalars.. ]
@@ -408,34 +434,39 @@ pub fn transfer_proof_instructions(
     let mut instructions = vec![];
 
     // build the lookup tables
+    let mut input_offset = HEADER_SIZE;
     for input_num in 0..num_proof_inputs {
-        let input_offset = HEADER_SIZE + input_num * 32 * 2;
         let table_offset = tables_offset + input_num * table_size;
         let scratch_space = scratch_space.try_into().unwrap();
-        instructions.extend_from_slice(
-            &decompress_point_with_witness(input_offset, scratch_space, table_offset),
-        );
+        if with_witness {
+            instructions.extend_from_slice(
+                &decompress_point_with_witness(input_offset, scratch_space, table_offset),
+            );
+        } else {
+            instructions.extend_from_slice(
+                &decompress_point(input_offset, scratch_space, table_offset),
+            );
+        }
+        input_offset += proof_point_size(with_witness);
     }
 
     // copy the scalars
-    let input_scalars_offset =
-        HEADER_SIZE + num_proof_inputs * 32 * 2;
+    let scalar_bytes = 32 * num_proof_scalars;
     instructions.push(
         DSLInstruction::CopyInput(CopyInputData{
-            input_offset: input_scalars_offset.try_into().unwrap(),
+            input_offset: input_offset.try_into().unwrap(),
             compute_offset: scalars_offset.try_into().unwrap(),
-            bytes: 32 * u32::try_from(num_proof_scalars).unwrap(),
+            bytes: scalar_bytes.try_into().unwrap(),
         }),
     );
+    input_offset += scalar_bytes;
 
     // copy the identity inputs
     let mut result_offset = HEADER_SIZE;
-    let input_identity_offset =
-        input_scalars_offset + num_proof_scalars * 32;
     for _group_size in proof_groups.iter() {
         instructions.push(
             DSLInstruction::CopyInput(CopyInputData{
-                input_offset: input_identity_offset.try_into().unwrap(),
+                input_offset: input_offset.try_into().unwrap(),
                 compute_offset: result_offset.try_into().unwrap(),
                 bytes: 32 * 4,
             }),
