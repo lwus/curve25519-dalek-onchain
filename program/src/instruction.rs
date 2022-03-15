@@ -400,7 +400,6 @@ pub fn transfer_proof_instructions(
     let result_space_size = proof_groups.len() * 32 * 4;
     let scratch_space = HEADER_SIZE + result_space_size;
     let scratch_space_size = 32 * 12; // space needed for decompression
-    let decompress_res_offset = 32 * 2; // where decompressed result is written
 
     let scalars_offset = scratch_space + scratch_space_size;
     let tables_offset  = scalars_offset + 32 * num_proof_scalars;
@@ -413,20 +412,9 @@ pub fn transfer_proof_instructions(
         let input_offset = HEADER_SIZE + input_num * 32 * 2;
         let table_offset = tables_offset + input_num * table_size;
         let scratch_space = scratch_space.try_into().unwrap();
-        instructions.extend_from_slice(&[
-            DSLInstruction::CopyInput(CopyInputData{
-                input_offset: input_offset.try_into().unwrap(),
-                compute_offset: scratch_space,
-                bytes: 64,
-            }),
-            DSLInstruction::DecompressWithWitness(RunDecompressData{
-                offset: scratch_space,
-            }),
-            DSLInstruction::BuildLookupTable(BuildLookupTableData{
-                point_offset: scratch_space + decompress_res_offset,
-                table_offset: table_offset.try_into().unwrap(),
-            }),
-        ]);
+        instructions.extend_from_slice(
+            &decompress_point_with_witness(input_offset, scratch_space, table_offset),
+        );
     }
 
     // copy the scalars
@@ -478,6 +466,68 @@ pub fn transfer_proof_instructions(
     }
 
     dsl_instructions_to_bytes(&instructions)
+}
+
+// CompressedRistretto -> Table<Ristretto>
+#[cfg(not(target_arch = "bpf"))]
+pub fn decompress_point(
+    input_offset: usize,
+    scratch_space: u32,
+    table_offset: usize,
+) -> [DSLInstruction; 8] {
+    [
+        DSLInstruction::CopyInput(CopyInputData{
+            input_offset: input_offset.try_into().unwrap(),
+            compute_offset: scratch_space,
+            bytes: 32,
+        }),
+        DSLInstruction::DecompressInit(RunDecompressData{
+            offset: scratch_space,
+        }),
+        DSLInstruction::InvSqrtInit(RunDecompressData{
+            offset: scratch_space + 32,
+        }),
+        DSLInstruction::Pow22501P1(RunDecompressData{
+            offset: scratch_space + 32 * 2,
+        }),
+        DSLInstruction::Pow22501P2(RunDecompressData{
+            offset: scratch_space + 32 * 3,
+        }),
+        DSLInstruction::InvSqrtFini(RunDecompressData{
+            offset: scratch_space + 32,
+        }),
+        DSLInstruction::DecompressFini(RunDecompressData{
+            offset: scratch_space,
+        }),
+        DSLInstruction::BuildLookupTable(BuildLookupTableData{
+            point_offset: scratch_space + 32 * 8,
+            table_offset: table_offset.try_into().unwrap(),
+        }),
+    ]
+}
+
+// CompressedRistretto, 2^225-1 witness -> Table<Ristretto>
+// more input copying, less compute
+#[cfg(not(target_arch = "bpf"))]
+pub fn decompress_point_with_witness(
+    input_offset: usize,
+    scratch_space: u32,
+    table_offset: usize,
+) -> [DSLInstruction; 3] {
+    [
+        DSLInstruction::CopyInput(CopyInputData{
+            input_offset: input_offset.try_into().unwrap(),
+            compute_offset: scratch_space,
+            bytes: 64,
+        }),
+        DSLInstruction::DecompressWithWitness(RunDecompressData{
+            offset: scratch_space,
+        }),
+        DSLInstruction::BuildLookupTable(BuildLookupTableData{
+            point_offset: scratch_space + 32 * 2,
+            table_offset: table_offset.try_into().unwrap(),
+        }),
+    ]
 }
 
 #[cfg(not(target_arch = "bpf"))]
