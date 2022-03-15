@@ -16,6 +16,7 @@ use {
         id,
         instruction,
         processor::process_instruction,
+        scalar::Scalar,
     },
     sha2::{Digest, Sha512},
     std::convert::TryInto,
@@ -146,19 +147,6 @@ async fn crank_dsl(
 
 #[tokio::test]
 async fn test_multiscalar_mul() {
-    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
-
-    // pc.set_bpf_compute_max_units(350_000);
-
-    let (mut banks_client, payer, recent_blockhash) = pc.start().await;
-
-    let rent = banks_client.get_rent().await;
-    let rent = rent.unwrap();
-
-    let compute_buffer = Keypair::new();
-    let input_buffer = Keypair::new();
-    let instruction_buffer = Keypair::new();
-
     let element_bytes = [
         202 , 148 , 27  , 77  , 122 , 101 , 116 , 31  ,
         215 , 41  , 243 , 54  , 4   , 27  , 77  , 165 ,
@@ -173,7 +161,6 @@ async fn test_multiscalar_mul() {
         242 , 190 , 61  , 18  , 88  , 179 , 89  , 40  ,
     ];
 
-    use curve25519_dalek_onchain::scalar::Scalar;
     let scalars = vec![
         -Scalar::one() - Scalar::one(),
         Scalar::one() + Scalar::one(),
@@ -206,16 +193,50 @@ async fn test_multiscalar_mul() {
         ).compress().to_bytes(),
     ];
 
+    run_multiscalar_mul(
+        vec![11],
+        &points,
+        &scalars,
+        true,
+    ).await;
+
+    run_multiscalar_mul(
+        vec![4, 7],
+        &points,
+        &scalars,
+        false,
+    ).await;
+}
+
+
+async fn run_multiscalar_mul(
+    proof_groups: Vec<usize>,
+    points: &[[u8; 32]],
+    scalars: &[Scalar],
+    with_witness: bool,
+) {
+    let pc = ProgramTest::new("curve25519_dalek_onchain", id(), processor!(process_instruction));
+
+    // pc.set_bpf_compute_max_units(350_000);
+
+    let (mut banks_client, payer, recent_blockhash) = pc.start().await;
+
+    let rent = banks_client.get_rent().await;
+    let rent = rent.unwrap();
+
     assert_eq!(scalars.len(), points.len());
 
-    let proof_groups = vec![11];
-    let dsl = instruction::transfer_proof_instructions(proof_groups.clone(), true);
+    let dsl = instruction::transfer_proof_instructions(proof_groups.clone(), with_witness);
 
     let instruction_buffer_len = (instruction::HEADER_SIZE + dsl.len()) as usize;
     let input_buffer_len = instruction::HEADER_SIZE + scalars.len() * 32 * 3 + 128;
 
     // pick a large number... at least > 8 * 128 * scalars.len()
     let compute_buffer_len = instruction::HEADER_SIZE + 102400;
+
+    let compute_buffer = Keypair::new();
+    let input_buffer = Keypair::new();
+    let instruction_buffer = Keypair::new();
 
     let mut instructions = vec![];
     instructions.extend_from_slice(
@@ -233,11 +254,17 @@ async fn test_multiscalar_mul() {
 
     write_dsl_instructions(&mut instructions, &dsl, &payer, &instruction_buffer);
 
+    let write_points = if with_witness {
+        instruction::write_input_points_with_witness
+    } else {
+        instruction::write_input_points
+    };
+
     instructions.extend_from_slice(
-        instruction::write_input_points_with_witness(
+        write_points(
             input_buffer.pubkey(),
             payer.pubkey(),
-            points.as_slice(),
+            points,
         ).unwrap().as_slice(),
     );
 
@@ -245,8 +272,8 @@ async fn test_multiscalar_mul() {
         instruction::write_input_scalars_and_identity(
             input_buffer.pubkey(),
             payer.pubkey(),
-            scalars.as_slice(),
-            true,
+            scalars,
+            with_witness,
         ).as_slice(),
     );
 
